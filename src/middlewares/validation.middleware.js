@@ -32,11 +32,13 @@ const schemas = {
   }),
   
   googleAuth: Joi.object({
-    tokenId: Joi.string(),
+    tokenId: Joi.string().required(),
     profileObj: Joi.object({
       email: Joi.string().email().required(),
       name: Joi.string().required(),
-      imageUrl: Joi.string().uri()
+      imageUrl: Joi.string().uri().optional().allow('', null),
+      googleId: Joi.string().required(),
+      role: Joi.string().valid(USER_ROLES.CUSTOMER, USER_ROLES.OWNER).default(USER_ROLES.CUSTOMER)
     }).required()
   }),
   
