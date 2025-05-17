@@ -51,6 +51,11 @@ const login = asyncHandler(async (req, res) => {
 const googleAuth = asyncHandler(async (req, res) => {
   const { tokenId, profileObj } = req.body;
   
+  // Extra validation
+  if (!tokenId || !profileObj) {
+    return errorResponse(res, 'Missing required Google auth data', HTTP_STATUS.BAD_REQUEST);
+  }
+  
   try {
     const result = await authService.googleAuth({ tokenId, profileObj });
 
@@ -62,6 +67,7 @@ const googleAuth = asyncHandler(async (req, res) => {
       HTTP_STATUS.OK
     );
   } catch (error) {
+    console.error('Google auth controller error:', error);
     return errorResponse(res, error.message, error.statusCode || HTTP_STATUS.BAD_REQUEST);
   }
 });

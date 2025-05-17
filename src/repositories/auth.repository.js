@@ -1,4 +1,5 @@
-const { User, sequelize } = require('../models');
+const { User } = require('../models');
+const { Op } = require('sequelize');
 
 class AuthRepository {
   // Find user by email
@@ -10,7 +11,7 @@ class AuthRepository {
   async findByGoogleIdOrEmail(googleId, email) {
     return await User.findOne({ 
       where: { 
-        [sequelize.Op.or]: [
+        [Op.or]: [
           { googleId },
           { email }
         ]
@@ -25,6 +26,15 @@ class AuthRepository {
 
   // Update user
   async updateUser(user, updateData) {
+    // Handle if user is an ID or an object
+    if (typeof user === 'string' || typeof user === 'number') {
+      const userObj = await User.findByPk(user);
+      if (!userObj) {
+        throw new Error('User not found');
+      }
+      return await userObj.update(updateData);
+    }
+    // If user is already an object
     return await user.update(updateData);
   }
 }
