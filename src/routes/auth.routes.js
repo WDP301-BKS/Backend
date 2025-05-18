@@ -1,7 +1,8 @@
 const express = require('express');
-const { register, login, googleAuth } = require('../controllers/auth.controller');
+const { register, login, googleAuth, verifyEmail, resendVerification } = require('../controllers/auth.controller');
 const { validateRequest, schemas } = require('../middlewares/validation.middleware');
 const { authMiddleware } = require('../middlewares/auth.middleware');
+const { authService } = require('../services');
 
 const router = express.Router();
 
@@ -18,6 +19,31 @@ router.post('/register', validateRequest(schemas.register), register);
  * @access Public
  */
 router.post('/login', validateRequest(schemas.login), login);
+
+/**
+ * @route GET /api/auth/verify/:token
+ * @desc Verify user email with token
+ * @access Public
+ */
+router.get('/verify/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+    const result = await authService.verifyEmail(token);
+    
+    // Redirect to frontend verification success page
+    return res.redirect(`${process.env.FRONTEND_URL}/verification-success?email=${result.user.email}`);
+  } catch (error) {
+    // Redirect to frontend verification failure page
+    return res.redirect(`${process.env.FRONTEND_URL}/verification-failed?error=${encodeURIComponent(error.message)}`);
+  }
+});
+
+/**
+ * @route POST /api/auth/resend-verification
+ * @desc Resend verification email
+ * @access Public
+ */
+router.post('/resend-verification', validateRequest(schemas.resendVerification), resendVerification);
 
 /**
  * @route POST /api/auth/google

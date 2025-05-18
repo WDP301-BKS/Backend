@@ -16,14 +16,20 @@ const register = asyncHandler(async (req, res) => {
   try {
     const result = await authService.register({ name, email, password, phone, role });
 
+    // Add verification status to response
+    const message = result.emailSent 
+      ? SUCCESS_MESSAGES.USER_REGISTERED
+      : 'User registered successfully, but verification email could not be sent. Please contact support.';
+
     return authSuccessResponse(
       res,
-      SUCCESS_MESSAGES.USER_REGISTERED,
+      message,
       result.user,
       result.token,
       HTTP_STATUS.CREATED
     );
   } catch (error) {
+    console.error('Registration error:', error);
     return errorResponse(res, error.message, error.statusCode || HTTP_STATUS.BAD_REQUEST);
   }
 });
@@ -44,6 +50,39 @@ const login = asyncHandler(async (req, res) => {
     );
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || HTTP_STATUS.UNAUTHORIZED);
+  }
+});
+
+// Verify email with token
+const verifyEmail = asyncHandler(async (req, res) => {
+  const { token } = req.params;
+
+  try {
+    const result = await authService.verifyEmail(token);
+    
+    return res.status(HTTP_STATUS.OK).json({
+      success: true,
+      message: result.message,
+      data: result.user
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || HTTP_STATUS.BAD_REQUEST);
+  }
+});
+
+// Resend verification email
+const resendVerification = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const result = await authService.resendVerificationEmail(email);
+    
+    return res.status(HTTP_STATUS.OK).json({
+      success: true,
+      message: result.message
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || HTTP_STATUS.BAD_REQUEST);
   }
 });
 
@@ -75,5 +114,7 @@ const googleAuth = asyncHandler(async (req, res) => {
 module.exports = {
   register,
   login,
-  googleAuth
+  googleAuth,
+  verifyEmail,
+  resendVerification
 }; 

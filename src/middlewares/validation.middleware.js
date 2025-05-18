@@ -30,6 +30,10 @@ const schemas = {
     email: Joi.string().email().required(),
     password: Joi.string().required()
   }),
+
+  resendVerification: Joi.object({
+    email: Joi.string().email().required()
+  }),
   
   googleAuth: Joi.object({
     tokenId: Joi.string().required(),

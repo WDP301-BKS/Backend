@@ -7,6 +7,11 @@ class AuthRepository {
     return await User.findOne({ where: { email } });
   }
 
+  // Find user by verification token
+  async findByVerificationToken(token) {
+    return await User.findOne({ where: { verification_token: token } });
+  }
+
   // Find user by googleId or email
   async findByGoogleIdOrEmail(googleId, email) {
     return await User.findOne({ 
