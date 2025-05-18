@@ -40,6 +40,13 @@ const User = sequelize.define('user', {
   is_active: {
     type: DataTypes.BOOLEAN,
     defaultValue: true
+  },
+  verification_token: {
+    type: DataTypes.STRING
+  },
+  is_verified: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
   }
 }, {
   timestamps: true,

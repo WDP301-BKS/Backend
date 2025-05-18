@@ -3,12 +3,27 @@ require('dotenv').config();
 
 // Cấu hình transporter cho Nodemailer
 const transporter = nodemailer.createTransport({
-  service: 'gmail', // Sử dụng Gmail làm dịch vụ gửi email
+  service: process.env.EMAIL_SERVICE || 'gmail', // Sử dụng từ biến môi trường
   auth: {
-    user: process.env.EMAIL_USER, // Email người gửi (nên được cấu hình trong file .env)
-    pass: process.env.EMAIL_PASS // Mật khẩu ứng dụng Gmail (nên được cấu hình trong file .env)
+    user: process.env.EMAIL_USER, // Email người gửi
+    pass: process.env.EMAIL_PASS  // Mật khẩu ứng dụng Gmail
+  },
+  // Thêm tùy chọn tránh lỗi xác thực PLAIN
+  secure: true, // Sử dụng SSL
+  tls: {
+    rejectUnauthorized: false
   }
 });
+
+// Kiểm tra kết nối khi khởi động
+(async function verifyEmailConnection() {
+  try {
+    await transporter.verify();
+    console.log('Email service is ready to send emails');
+  } catch (error) {
+    console.error('Email service configuration error:', error);
+  }
+})();
 
 /**
  * Gửi email

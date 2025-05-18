@@ -5,10 +5,17 @@ const {
   constants,
   errorHandler
 } = require('../common');
+const { sendRegistrationEmail } = require('../utils/emailService');
+const crypto = require('crypto');
 
 const { USER_ROLES, CONFIG, ERROR_MESSAGES } = constants;
 
 class AuthService {
+  // Generate verification token
+  generateVerificationToken() {
+    return crypto.randomBytes(32).toString('hex');
+  }
+
   // Register a new user
   async register(userData) {
     const { name, email, password, phone, role } = userData;
@@ -23,14 +30,34 @@ class AuthService {
       throw new errorHandler.AppError(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS, 400);
     }
 
-    // Create new user
+    // Generate verification token
+    const verificationToken = this.generateVerificationToken();
+    
+    // Create new user with verification token and is_verified=false
     const user = await authRepository.createUser({
       name,
       email,
       password_hash: password, // Will be hashed by Sequelize hooks
       phone,
-      role: role || USER_ROLES.CUSTOMER
+      role: role || USER_ROLES.CUSTOMER,
+      verification_token: verificationToken,
+      is_verified: false,
+      is_active: true // Thay đổi thành true để người dùng vẫn có thể đăng nhập
     });
+
+    // Generate verification link - Sử dụng URL backend API thay vì frontend
+    const verificationLink = `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/auth/verify/${verificationToken}`;
+    
+    // Send verification email - handle errors without failing registration
+    try {
+      await sendRegistrationEmail(email, name, verificationLink);
+      console.log(`Verification email sent to ${email}`);
+    } catch (error) {
+      console.error('Failed to send verification email:', error);
+      // We don't throw here, registration can still proceed
+      // Optionally, we can set a flag for the frontend to display
+      // a message about sending the email later
+    }
 
     // Generate token
     const token = jwtUtils.generateToken({ id: user.id }, CONFIG.JWT_EXPIRATION);
@@ -40,9 +67,11 @@ class AuthService {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role
+        role: user.role,
+        is_verified: user.is_verified
       },
-      token
+      token,
+      emailSent: true
     };
   }
 
@@ -55,6 +84,11 @@ class AuthService {
     
     if (!user) {
       throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
+    }
+
+    // Check if account is verified
+    if (!user.is_verified) {
+      throw new errorHandler.AppError('Vui lòng xác thực email trước khi đăng nhập', 403);
     }
 
     // Check if account is active
@@ -77,10 +111,70 @@ class AuthService {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role
+        role: user.role,
+        is_verified: user.is_verified
       },
       token
     };
+  }
+
+  // Verify email with token
+  async verifyEmail(token) {
+    // Find user by verification token
+    const user = await authRepository.findByVerificationToken(token);
+    
+    if (!user) {
+      throw new errorHandler.AppError('Invalid or expired verification token', 400);
+    }
+    
+    // Update user as verified and active
+    user.is_verified = true;
+    user.is_active = true;
+    user.verification_token = null; // Clear the verification token
+    
+    await user.save();
+    
+    return {
+      message: 'Email verified successfully',
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email
+      }
+    };
+  }
+
+  // Resend verification email
+  async resendVerificationEmail(email) {
+    // Find user by email
+    const user = await authRepository.findByEmail(email);
+    
+    if (!user) {
+      throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
+    }
+    
+    if (user.is_verified) {
+      throw new errorHandler.AppError('User is already verified', 400);
+    }
+    
+    // Generate new verification token
+    const verificationToken = this.generateVerificationToken();
+    user.verification_token = verificationToken;
+    await user.save();
+    
+    // Generate verification link
+    const verificationLink = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+    
+    // Send verification email - handle errors
+    try {
+      await sendRegistrationEmail(user.email, user.name, verificationLink);
+      return {
+        message: 'Verification email resent successfully'
+      };
+    } catch (error) {
+      console.error('Failed to resend verification email:', error);
+      throw new errorHandler.AppError('Failed to send verification email. Please try again later.', 500);
+    }
   }
 
   // Google login or registration
@@ -119,16 +213,28 @@ class AuthService {
         if (!user.googleId && googleId) {
           user = await authRepository.updateUser(user.id, { googleId });
         }
+
+        // If the user registered with Google but hasn't been verified yet
+        if (!user.is_verified) {
+          // Mark as verified since Google authentication is trusted
+          user.is_verified = true;
+          user.is_active = true;
+          await user.save();
+        }
       } else {
         // Create new user with requested role
         console.log('Creating new user with role:', requestedRole);
         const randomPassword = passwordUtils.generateRandomPassword();
+        
+        // For Google auth users, automatically verify them
         user = await authRepository.createUser({
           name,
           email,
           googleId,
           password_hash: randomPassword, // Will be hashed by Sequelize hooks
-          role: requestedRole
+          role: requestedRole,
+          is_verified: true, // Automatically verify Google users
+          is_active: true
         });
       }
       
@@ -145,7 +251,8 @@ class AuthService {
           id: user.id,
           name: user.name,
           email: user.email,
-          role: user.role
+          role: user.role,
+          is_verified: user.is_verified
         },
         token
       };
