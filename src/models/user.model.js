@@ -1,7 +1,6 @@
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/db.config');
-const bcrypt = require('bcryptjs');
-const { constants } = require('../common');
+const { constants, passwordUtils } = require('../common');
 const { USER_ROLES, CONFIG } = constants;
 
 const User = sequelize.define('user', {
@@ -55,21 +54,19 @@ const User = sequelize.define('user', {
   hooks: {
     beforeCreate: async (user) => {
       if (user.password_hash) {
-        const salt = await bcrypt.genSalt(CONFIG.PASSWORD_SALT_ROUNDS);
-        user.password_hash = await bcrypt.hash(user.password_hash, salt);
+        user.password_hash = await passwordUtils.hashPassword(user.password_hash, CONFIG.PASSWORD_SALT_ROUNDS);
       }
     },
     beforeUpdate: async (user) => {
       if (user.changed('password_hash')) {
-        const salt = await bcrypt.genSalt(CONFIG.PASSWORD_SALT_ROUNDS);
-        user.password_hash = await bcrypt.hash(user.password_hash, salt);
+        user.password_hash = await passwordUtils.hashPassword(user.password_hash, CONFIG.PASSWORD_SALT_ROUNDS);
       }
     }
   }
 });
 
 User.prototype.comparePassword = async function(password) {
-  return await bcrypt.compare(password, this.password_hash);
+  return await passwordUtils.comparePassword(password, this.password_hash);
 };
 
 module.exports = User; 

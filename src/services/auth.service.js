@@ -3,13 +3,21 @@ const {
   jwtUtils, 
   passwordUtils, 
   constants,
-  errorHandler
+  errorHandler,
+  validationUtils
 } = require('../common');
 const { sendRegistrationEmail } = require('../utils/emailService');
 const crypto = require('crypto');
 const { Op } = require('sequelize');
 
 const { USER_ROLES, CONFIG, ERROR_MESSAGES } = constants;
+const { 
+  AppError, 
+  NotFoundError, 
+  BadRequestError,
+  UnauthorizedError,
+  ForbiddenError
+} = errorHandler;
 
 class AuthService {
   // Repository methods integrated directly into service
@@ -41,7 +49,7 @@ class AuthService {
     if (typeof user === 'string' || typeof user === 'number') {
       const userObj = await User.findByPk(user);
       if (!userObj) {
-        throw new Error('User not found');
+        throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
       }
       return await userObj.update(updateData);
     }
@@ -59,13 +67,28 @@ class AuthService {
     const { name, email, password, phone, role } = userData;
 
     if (!password) {
-      throw new errorHandler.AppError("Password is required", 400);
+      throw new BadRequestError("Password is required");
+    }
+
+    // Validate email format
+    if (!validationUtils.isValidEmail(email)) {
+      throw new BadRequestError("Invalid email format");
+    }
+
+    // Validate password strength
+    if (!validationUtils.isStrongPassword(password)) {
+      throw new BadRequestError("Password must be at least 8 characters and include uppercase, lowercase, and numbers");
+    }
+
+    // Validate phone number if provided
+    if (phone && !validationUtils.isValidVietnamesePhone(phone)) {
+      throw new BadRequestError("Invalid Vietnamese phone number format");
     }
 
     // Check if email already exists
     const existingUser = await this.findByEmail(email);
     if (existingUser) {
-      throw new errorHandler.AppError(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS, 400);
+      throw new BadRequestError(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS);
     }
 
     // Generate verification token
@@ -80,10 +103,10 @@ class AuthService {
       role: role || USER_ROLES.CUSTOMER,
       verification_token: verificationToken,
       is_verified: false,
-      is_active: true // Thay đổi thành true để người dùng vẫn có thể đăng nhập
+      is_active: true
     });
 
-    // Generate verification link - Sử dụng URL backend API thay vì frontend
+    // Generate verification link
     const verificationLink = `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/auth/verify/${verificationToken}`;
     
     // Send verification email - handle errors without failing registration
@@ -92,9 +115,6 @@ class AuthService {
       console.log(`Verification email sent to ${email}`);
     } catch (error) {
       console.error('Failed to send verification email:', error);
-      // We don't throw here, registration can still proceed
-      // Optionally, we can set a flag for the frontend to display
-      // a message about sending the email later
     }
 
     // Generate token
@@ -117,28 +137,33 @@ class AuthService {
   async login(credentials) {
     const { email, password } = credentials;
 
+    // Validate email format
+    if (!validationUtils.isValidEmail(email)) {
+      throw new BadRequestError("Invalid email format");
+    }
+
     // Find user by email
     const user = await this.findByEmail(email);
     
     if (!user) {
-      throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
+      throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
     }
 
     // Check if account is verified
     if (!user.is_verified) {
-      throw new errorHandler.AppError('Vui lòng xác thực email trước khi đăng nhập', 403);
+      throw new ForbiddenError('Vui lòng xác thực email trước khi đăng nhập');
     }
 
     // Check if account is active
     if (!user.is_active) {
-      throw new errorHandler.AppError(ERROR_MESSAGES.ACCOUNT_INACTIVE, 403);
+      throw new ForbiddenError(ERROR_MESSAGES.ACCOUNT_INACTIVE);
     }
 
     // Validate password
-    const isPasswordValid = await user.comparePassword(password);
+    const isPasswordValid = await passwordUtils.comparePassword(password, user.password_hash);
     
     if (!isPasswordValid) {
-      throw new errorHandler.AppError(ERROR_MESSAGES.INVALID_CREDENTIALS, 401);
+      throw new UnauthorizedError(ERROR_MESSAGES.INVALID_CREDENTIALS);
     }
 
     // Generate token
@@ -162,7 +187,7 @@ class AuthService {
     const user = await this.findByVerificationToken(token);
     
     if (!user) {
-      throw new errorHandler.AppError('Invalid or expired verification token', 400);
+      throw new BadRequestError('Invalid or expired verification token');
     }
     
     // Update user as verified and active
@@ -184,15 +209,20 @@ class AuthService {
 
   // Resend verification email
   async resendVerificationEmail(email) {
+    // Validate email format
+    if (!validationUtils.isValidEmail(email)) {
+      throw new BadRequestError("Invalid email format");
+    }
+    
     // Find user by email
     const user = await this.findByEmail(email);
     
     if (!user) {
-      throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
+      throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
     }
     
     if (user.is_verified) {
-      throw new errorHandler.AppError('User is already verified', 400);
+      throw new BadRequestError('User is already verified');
     }
     
     // Generate new verification token
@@ -211,7 +241,7 @@ class AuthService {
       };
     } catch (error) {
       console.error('Failed to resend verification email:', error);
-      throw new errorHandler.AppError('Failed to send verification email. Please try again later.', 500);
+      throw new AppError('Failed to send verification email. Please try again later.', 500);
     }
   }
 
@@ -221,7 +251,12 @@ class AuthService {
       const { profileObj, tokenId } = googleData;
       
       if (!profileObj || !profileObj.email) {
-        throw new errorHandler.AppError('Invalid Google profile data', 400);
+        throw new BadRequestError('Invalid Google profile data');
+      }
+
+      // Validate email format
+      if (!validationUtils.isValidEmail(profileObj.email)) {
+        throw new BadRequestError("Invalid email format");
       }
 
       // Log the inputs for debugging
@@ -277,7 +312,7 @@ class AuthService {
       
       // Check if account is active
       if (!user.is_active) {
-        throw new errorHandler.AppError(ERROR_MESSAGES.ACCOUNT_INACTIVE, 403);
+        throw new ForbiddenError(ERROR_MESSAGES.ACCOUNT_INACTIVE);
       }
       
       // Generate token

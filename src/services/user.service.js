@@ -1,6 +1,18 @@
 const { User } = require('../models');
-const { errorHandler, constants } = require('../common');
-const { ERROR_MESSAGES } = constants;
+const { 
+  errorHandler, 
+  constants, 
+  validationUtils, 
+  passwordUtils 
+} = require('../common');
+const { ERROR_MESSAGES, HTTP_STATUS } = constants;
+const { 
+  AppError, 
+  NotFoundError, 
+  BadRequestError,
+  UnauthorizedError,
+  ForbiddenError
+} = errorHandler;
 
 class UserService {
   // Repository methods integrated directly into service
@@ -44,7 +56,7 @@ class UserService {
   async getCurrentUser(userId) {
     const user = await this.findById(userId);
     if (!user) {
-      throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
+      throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
     }
     return user;
   }
@@ -52,14 +64,31 @@ class UserService {
   async updateCurrentUser(userId, updateData) {
     const user = await this.findById(userId);
     if (!user) {
-      throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
+      throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
     }
     
-    if (updateData.email && updateData.email !== user.email) {
-      const existingUser = await this.findByEmail(updateData.email);
-      if (existingUser) {
-        throw new errorHandler.AppError(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS, 400);
+    // Validate email if updating
+    if (updateData.email) {
+      if (!validationUtils.isValidEmail(updateData.email)) {
+        throw new BadRequestError("Invalid email format");
       }
+      
+      if (updateData.email !== user.email) {
+        const existingUser = await this.findByEmail(updateData.email);
+        if (existingUser) {
+          throw new BadRequestError(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS);
+        }
+      }
+    }
+    
+    // Validate password if updating
+    if (updateData.password && !validationUtils.isStrongPassword(updateData.password)) {
+      throw new BadRequestError("Password must be at least 8 characters and include uppercase, lowercase, and numbers");
+    }
+    
+    // Validate phone if updating
+    if (updateData.phone && !validationUtils.isValidVietnamesePhone(updateData.phone)) {
+      throw new BadRequestError("Invalid Vietnamese phone number format");
     }
     
     return await this.update(user, {
@@ -93,7 +122,7 @@ class UserService {
   async getUserById(userId) {
     const user = await this.findById(userId);
     if (!user) {
-      throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
+      throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
     }
     return user;
   }
@@ -101,14 +130,31 @@ class UserService {
   async updateUserById(userId, updateData) {
     const user = await this.findById(userId);
     if (!user) {
-      throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
+      throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
     }
     
-    if (updateData.email && updateData.email !== user.email) {
-      const existingUser = await this.findByEmail(updateData.email);
-      if (existingUser) {
-        throw new errorHandler.AppError(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS, 400);
+    // Validate email if updating
+    if (updateData.email) {
+      if (!validationUtils.isValidEmail(updateData.email)) {
+        throw new BadRequestError("Invalid email format");
       }
+      
+      if (updateData.email !== user.email) {
+        const existingUser = await this.findByEmail(updateData.email);
+        if (existingUser) {
+          throw new BadRequestError(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS);
+        }
+      }
+    }
+    
+    // Validate password if updating
+    if (updateData.password && !validationUtils.isStrongPassword(updateData.password)) {
+      throw new BadRequestError("Password must be at least 8 characters and include uppercase, lowercase, and numbers");
+    }
+    
+    // Validate phone if updating
+    if (updateData.phone && !validationUtils.isValidVietnamesePhone(updateData.phone)) {
+      throw new BadRequestError("Invalid Vietnamese phone number format");
     }
     
     return await this.update(user, {
@@ -124,7 +170,7 @@ class UserService {
   async deleteUser(userId) {
     const user = await this.findById(userId);
     if (!user) {
-      throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
+      throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
     }
     
     return await this.update(user, { is_active: false });
