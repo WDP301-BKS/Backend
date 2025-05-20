@@ -1,4 +1,4 @@
-const { authRepository } = require('../repositories');
+const { User } = require('../models');
 const { 
   jwtUtils, 
   passwordUtils, 
@@ -7,10 +7,48 @@ const {
 } = require('../common');
 const { sendRegistrationEmail } = require('../utils/emailService');
 const crypto = require('crypto');
+const { Op } = require('sequelize');
 
 const { USER_ROLES, CONFIG, ERROR_MESSAGES } = constants;
 
 class AuthService {
+  // Repository methods integrated directly into service
+  async findByEmail(email) {
+    return await User.findOne({ where: { email } });
+  }
+
+  async findByVerificationToken(token) {
+    return await User.findOne({ where: { verification_token: token } });
+  }
+
+  async findByGoogleIdOrEmail(googleId, email) {
+    return await User.findOne({ 
+      where: { 
+        [Op.or]: [
+          { googleId },
+          { email }
+        ]
+      } 
+    });
+  }
+
+  async createUser(userData) {
+    return await User.create(userData);
+  }
+
+  async updateUser(user, updateData) {
+    // Handle if user is an ID or an object
+    if (typeof user === 'string' || typeof user === 'number') {
+      const userObj = await User.findByPk(user);
+      if (!userObj) {
+        throw new Error('User not found');
+      }
+      return await userObj.update(updateData);
+    }
+    // If user is already an object
+    return await user.update(updateData);
+  }
+
   // Generate verification token
   generateVerificationToken() {
     return crypto.randomBytes(32).toString('hex');
@@ -25,7 +63,7 @@ class AuthService {
     }
 
     // Check if email already exists
-    const existingUser = await authRepository.findByEmail(email);
+    const existingUser = await this.findByEmail(email);
     if (existingUser) {
       throw new errorHandler.AppError(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS, 400);
     }
@@ -34,7 +72,7 @@ class AuthService {
     const verificationToken = this.generateVerificationToken();
     
     // Create new user with verification token and is_verified=false
-    const user = await authRepository.createUser({
+    const user = await this.createUser({
       name,
       email,
       password_hash: password, // Will be hashed by Sequelize hooks
@@ -80,7 +118,7 @@ class AuthService {
     const { email, password } = credentials;
 
     // Find user by email
-    const user = await authRepository.findByEmail(email);
+    const user = await this.findByEmail(email);
     
     if (!user) {
       throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
@@ -121,7 +159,7 @@ class AuthService {
   // Verify email with token
   async verifyEmail(token) {
     // Find user by verification token
-    const user = await authRepository.findByVerificationToken(token);
+    const user = await this.findByVerificationToken(token);
     
     if (!user) {
       throw new errorHandler.AppError('Invalid or expired verification token', 400);
@@ -147,7 +185,7 @@ class AuthService {
   // Resend verification email
   async resendVerificationEmail(email) {
     // Find user by email
-    const user = await authRepository.findByEmail(email);
+    const user = await this.findByEmail(email);
     
     if (!user) {
       throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
@@ -197,13 +235,12 @@ class AuthService {
       const { email, name, googleId } = profileObj;
       
       // Validate role value for NEW users only
-      const requestedRole = (profileObj.role && 
-        (profileObj.role === USER_ROLES.OWNER || profileObj.role === USER_ROLES.CUSTOMER)) 
+      const requestedRole = (profileObj.role === USER_ROLES.OWNER || profileObj.role === USER_ROLES.CUSTOMER)
         ? profileObj.role 
         : USER_ROLES.CUSTOMER;
       
       // Check if user exists by googleId or email
-      let user = await authRepository.findByGoogleIdOrEmail(googleId, email);
+      let user = await this.findByGoogleIdOrEmail(googleId, email);
       
       if (user) {
         // User already exists - KEEP EXISTING ROLE
@@ -211,7 +248,7 @@ class AuthService {
         
         // Only update googleId if needed, do NOT change role
         if (!user.googleId && googleId) {
-          user = await authRepository.updateUser(user.id, { googleId });
+          user = await this.updateUser(user.id, { googleId });
         }
 
         // If the user registered with Google but hasn't been verified yet
@@ -227,7 +264,7 @@ class AuthService {
         const randomPassword = passwordUtils.generateRandomPassword();
         
         // For Google auth users, automatically verify them
-        user = await authRepository.createUser({
+        user = await this.createUser({
           name,
           email,
           googleId,

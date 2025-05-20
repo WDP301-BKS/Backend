@@ -1,33 +1,68 @@
-const { userRepository } = require('../repositories');
+const { User } = require('../models');
 const { errorHandler, constants } = require('../common');
 const { ERROR_MESSAGES } = constants;
 
 class UserService {
-  // Get current user profile
+  // Repository methods integrated directly into service
+  async findById(id) {
+    return await User.findByPk(id, {
+      attributes: { exclude: ['password_hash'] }
+    });
+  }
+
+  async findByEmail(email) {
+    return await User.findOne({ where: { email } });
+  }
+
+  async findAll(whereClause, limit, offset, order) {
+    const users = await User.findAll({
+      where: whereClause,
+      attributes: { exclude: ['password_hash'] },
+      order,
+      limit,
+      offset
+    });
+    
+    const total = await User.count({ where: whereClause });
+    
+    return { users, total };
+  }
+
+  async create(userData) {
+    return await User.create(userData);
+  }
+
+  async update(user, updateData) {
+    return await user.update(updateData);
+  }
+
+  async count(whereClause) {
+    return await User.count({ where: whereClause });
+  }
+
+  // Service methods
   async getCurrentUser(userId) {
-    const user = await userRepository.findById(userId);
+    const user = await this.findById(userId);
     if (!user) {
       throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
     }
     return user;
   }
   
-  // Update current user profile
   async updateCurrentUser(userId, updateData) {
-    const user = await userRepository.findById(userId);
+    const user = await this.findById(userId);
     if (!user) {
       throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
     }
     
-    // Check if email is already in use by another user
     if (updateData.email && updateData.email !== user.email) {
-      const existingUser = await userRepository.findByEmail(updateData.email);
+      const existingUser = await this.findByEmail(updateData.email);
       if (existingUser) {
         throw new errorHandler.AppError(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS, 400);
       }
     }
     
-    return await userRepository.update(user, {
+    return await this.update(user, {
       name: updateData.name || user.name,
       email: updateData.email || user.email,
       password_hash: updateData.password || user.password_hash,
@@ -35,7 +70,6 @@ class UserService {
     });
   }
   
-  // Get all users with pagination and filtering
   async getAllUsers(filters, pagination, sorting) {
     const whereClause = {};
     
@@ -46,7 +80,7 @@ class UserService {
     const { limit, offset } = pagination;
     const order = sorting;
     
-    const { users, total } = await userRepository.findAll(whereClause, limit, offset, order);
+    const { users, total } = await this.findAll(whereClause, limit, offset, order);
     
     return {
       total,
@@ -56,31 +90,28 @@ class UserService {
     };
   }
   
-  // Get user by ID
   async getUserById(userId) {
-    const user = await userRepository.findById(userId);
+    const user = await this.findById(userId);
     if (!user) {
       throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
     }
     return user;
   }
   
-  // Update user by ID (admin)
   async updateUserById(userId, updateData) {
-    const user = await userRepository.findById(userId);
+    const user = await this.findById(userId);
     if (!user) {
       throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
     }
     
-    // Check if email is already in use by another user
     if (updateData.email && updateData.email !== user.email) {
-      const existingUser = await userRepository.findByEmail(updateData.email);
+      const existingUser = await this.findByEmail(updateData.email);
       if (existingUser) {
         throw new errorHandler.AppError(ERROR_MESSAGES.EMAIL_ALREADY_EXISTS, 400);
       }
     }
     
-    return await userRepository.update(user, {
+    return await this.update(user, {
       name: updateData.name || user.name,
       email: updateData.email || user.email,
       password_hash: updateData.password || user.password_hash,
@@ -90,15 +121,13 @@ class UserService {
     });
   }
   
-  // Delete user (soft delete)
   async deleteUser(userId) {
-    const user = await userRepository.findById(userId);
+    const user = await this.findById(userId);
     if (!user) {
       throw new errorHandler.AppError(ERROR_MESSAGES.USER_NOT_FOUND, 404);
     }
     
-    // Soft delete by setting is_active to false
-    return await userRepository.update(user, { is_active: false });
+    return await this.update(user, { is_active: false });
   }
 }
 
