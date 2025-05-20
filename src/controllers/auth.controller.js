@@ -6,7 +6,11 @@ const {
 const { authService } = require('../services');
 
 const { asyncHandler } = errorHandler;
-const { authSuccessResponse, errorResponse } = apiResponse;
+const { 
+  authSuccessResponse, 
+  errorResponse, 
+  successResponse 
+} = apiResponse;
 const { SUCCESS_MESSAGES, HTTP_STATUS } = constants;
 
 // Register a new user
@@ -30,7 +34,12 @@ const register = asyncHandler(async (req, res) => {
     );
   } catch (error) {
     console.error('Registration error:', error);
-    return errorResponse(res, error.message, error.statusCode || HTTP_STATUS.BAD_REQUEST);
+    return errorResponse(
+      res, 
+      error.message, 
+      error.statusCode || HTTP_STATUS.BAD_REQUEST,
+      error.errors
+    );
   }
 });
 
@@ -49,7 +58,12 @@ const login = asyncHandler(async (req, res) => {
       HTTP_STATUS.OK
     );
   } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || HTTP_STATUS.UNAUTHORIZED);
+    return errorResponse(
+      res, 
+      error.message, 
+      error.statusCode || HTTP_STATUS.UNAUTHORIZED,
+      error.errors
+    );
   }
 });
 
@@ -60,13 +74,19 @@ const verifyEmail = asyncHandler(async (req, res) => {
   try {
     const result = await authService.verifyEmail(token);
     
-    return res.status(HTTP_STATUS.OK).json({
-      success: true,
-      message: result.message,
-      data: result.user
-    });
+    return successResponse(
+      res, 
+      result.message, 
+      result.user, 
+      HTTP_STATUS.OK
+    );
   } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || HTTP_STATUS.BAD_REQUEST);
+    return errorResponse(
+      res, 
+      error.message, 
+      error.statusCode || HTTP_STATUS.BAD_REQUEST,
+      error.errors
+    );
   }
 });
 
@@ -77,12 +97,19 @@ const resendVerification = asyncHandler(async (req, res) => {
   try {
     const result = await authService.resendVerificationEmail(email);
     
-    return res.status(HTTP_STATUS.OK).json({
-      success: true,
-      message: result.message
-    });
+    return successResponse(
+      res, 
+      result.message, 
+      null, 
+      HTTP_STATUS.OK
+    );
   } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || HTTP_STATUS.BAD_REQUEST);
+    return errorResponse(
+      res, 
+      error.message, 
+      error.statusCode || HTTP_STATUS.BAD_REQUEST,
+      error.errors
+    );
   }
 });
 
@@ -107,7 +134,12 @@ const googleAuth = asyncHandler(async (req, res) => {
     );
   } catch (error) {
     console.error('Google auth controller error:', error);
-    return errorResponse(res, error.message, error.statusCode || HTTP_STATUS.BAD_REQUEST);
+    return errorResponse(
+      res, 
+      error.message, 
+      error.statusCode || HTTP_STATUS.BAD_REQUEST,
+      error.errors
+    );
   }
 });
 
