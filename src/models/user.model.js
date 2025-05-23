@@ -32,6 +32,24 @@ const User = sequelize.define('user', {
   phone: {
     type: DataTypes.STRING
   },
+  profileImage: {
+    type: DataTypes.STRING
+  },
+  profileImageId: {
+    type: DataTypes.STRING
+  },
+  bio: {
+    type: DataTypes.TEXT
+  },
+  gender: {
+    type: DataTypes.ENUM('male', 'female', 'other')
+  },
+  dateOfBirth: {
+    type: DataTypes.DATEONLY
+  },
+  address: {
+    type: DataTypes.STRING
+  },
   role: {
     type: DataTypes.ENUM(USER_ROLES.CUSTOMER, USER_ROLES.OWNER, USER_ROLES.ADMIN),
     defaultValue: USER_ROLES.CUSTOMER
@@ -42,6 +60,12 @@ const User = sequelize.define('user', {
   },
   verification_token: {
     type: DataTypes.STRING
+  },
+  reset_password_token: {
+    type: DataTypes.STRING
+  },
+  reset_password_expires: {
+    type: DataTypes.DATE
   },
   is_verified: {
     type: DataTypes.BOOLEAN,

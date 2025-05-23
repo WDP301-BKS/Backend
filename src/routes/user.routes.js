@@ -2,6 +2,9 @@ const express = require('express');
 const {
   getCurrentUser,
   updateCurrentUser,
+  uploadProfileImage,
+  deleteProfileImage,
+  changePassword,
   getAllUsers,
   getUserById,
   updateUserById,
@@ -9,6 +12,7 @@ const {
 } = require('../controllers/user.controller');
 const { authMiddleware, isAdmin } = require('../middlewares/auth.middleware');
 const { validateRequest, schemas } = require('../middlewares/validation.middleware');
+const upload = require('../middlewares/uploadMiddleware');
 
 const router = express.Router();
 
@@ -25,6 +29,27 @@ router.get('/profile', authMiddleware, getCurrentUser);
  * @access Private (Any authenticated user)
  */
 router.put('/profile', [authMiddleware, validateRequest(schemas.updateUser)], updateCurrentUser);
+
+/**
+ * @route POST /api/users/profile/image
+ * @desc Upload profile image
+ * @access Private (Any authenticated user)
+ */
+router.post('/profile/image', [authMiddleware, upload.single('image')], uploadProfileImage);
+
+/**
+ * @route DELETE /api/users/profile/image
+ * @desc Delete profile image
+ * @access Private (Any authenticated user)
+ */
+router.delete('/profile/image', authMiddleware, deleteProfileImage);
+
+/**
+ * @route POST /api/users/change-password
+ * @desc Change user password
+ * @access Private (Any authenticated user)
+ */
+router.post('/change-password', [authMiddleware, validateRequest(schemas.changePassword)], changePassword);
 
 /**
  * @route GET /api/users

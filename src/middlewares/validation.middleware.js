@@ -51,7 +51,25 @@ const schemas = {
     email: Joi.string().email(),
     password: Joi.string().min(6),
     phone: Joi.string().pattern(/^[0-9+]{10,15}$/),
+    bio: Joi.string().max(500),
+    gender: Joi.string().valid('male', 'female', 'other'),
+    dateOfBirth: Joi.date(),
+    address: Joi.string().max(200),
     is_active: Joi.boolean()
+  }),
+  
+  changePassword: Joi.object({
+    currentPassword: Joi.string().required(),
+    newPassword: Joi.string().min(6).required()
+  }),
+  
+  forgotPassword: Joi.object({
+    email: Joi.string().email().required()
+  }),
+  
+  resetPassword: Joi.object({
+    token: Joi.string().required(),
+    newPassword: Joi.string().min(6).required()
   })
 };
 
