@@ -5,7 +5,7 @@ const {
   validationUtils, 
   passwordUtils 
 } = require('../common');
-const { uploadImage, deleteImage } = require('../utils/cloudinaryConfig');
+const { uploadImage, deleteImage } = require('../config/cloudinaryConfig');
 const { sendPasswordResetEmail } = require('../utils/emailService');
 const crypto = require('crypto');
 const { ERROR_MESSAGES, HTTP_STATUS } = constants;
@@ -188,17 +188,14 @@ class UserService {
     
     // Generate reset token
     const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetExpires = new Date();
-    resetExpires.setHours(resetExpires.getHours() + 1); // Token expires in 1 hour
     
-    // Update user with reset token and expiry
+    // Update user with reset token
     await this.update(user, {
-      reset_password_token: resetToken,
-      reset_password_expires: resetExpires
+      reset_password_token: resetToken
     });
     
     // Generate reset link
-    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/reset-password/${resetToken}`;
+    const resetLink = `${process.env.FRONTEND_URL}/auth/reset-password/${resetToken}`;
     
     try {
       // Send password reset email
@@ -219,20 +216,18 @@ class UserService {
     // Find user with valid reset token
     const user = await User.findOne({
       where: {
-        reset_password_token: token,
-        reset_password_expires: { $gt: new Date() }
+        reset_password_token: token
       }
     });
     
-    if (!user) {
+    if (!user || !user.reset_password_token) {
       throw new BadRequestError('Invalid or expired password reset token');
     }
     
     // Update user with new password and clear reset token
     await this.update(user, {
       password_hash: newPassword,
-      reset_password_token: null,
-      reset_password_expires: null
+      reset_password_token: null
     });
     
     return { success: true, message: 'Password has been reset successfully' };

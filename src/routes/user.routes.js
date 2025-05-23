@@ -12,7 +12,7 @@ const {
 } = require('../controllers/user.controller');
 const { authMiddleware, isAdmin } = require('../middlewares/auth.middleware');
 const { validateRequest, schemas } = require('../middlewares/validation.middleware');
-const upload = require('../middlewares/uploadMiddleware');
+const { upload, handleMulterError } = require('../middlewares/uploadMiddleware');
 
 const router = express.Router();
 
@@ -35,7 +35,15 @@ router.put('/profile', [authMiddleware, validateRequest(schemas.updateUser)], up
  * @desc Upload profile image
  * @access Private (Any authenticated user)
  */
-router.post('/profile/image', [authMiddleware, upload.single('image')], uploadProfileImage);
+router.post(
+  '/profile/image', 
+  [
+    authMiddleware,
+    upload.single('image'),
+    handleMulterError
+  ], 
+  uploadProfileImage
+);
 
 /**
  * @route DELETE /api/users/profile/image

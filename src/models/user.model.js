@@ -62,10 +62,21 @@ const User = sequelize.define('user', {
     type: DataTypes.STRING
   },
   reset_password_token: {
-    type: DataTypes.STRING
-  },
-  reset_password_expires: {
-    type: DataTypes.DATE
+    type: DataTypes.STRING(128),
+    get() {
+      const token = this.getDataValue('reset_password_token');
+      if (token) {
+        const tokenCreatedAt = new Date(this.updated_at);
+        const now = new Date();
+        const hoursSinceCreation = (now - tokenCreatedAt) / (1000 * 60 * 60);
+        
+        if (hoursSinceCreation > 1) {
+          this.update({ reset_password_token: null });
+          return null;
+        }
+      }
+      return token;
+    }
   },
   is_verified: {
     type: DataTypes.BOOLEAN,
