@@ -19,21 +19,42 @@ const { getPaginationParams, getSortingParams } = validationUtils;
 
 // Get current user profile
 const getCurrentUser = asyncHandler(async (req, res) => {
-  const user = req.user;
-  
-  return successResponse(res, 'User profile fetched successfully', {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    phone: user.phone,
-    profileImage: user.profileImage,
-    bio: user.bio,
-    gender: user.gender,
-    dateOfBirth: user.dateOfBirth,
-    address: user.address,
-    role: user.role,
-    created_at: user.created_at
-  }, HTTP_STATUS.OK);
+  try {
+    // Fetch complete user data from database instead of using req.user
+    const user = await User.findByPk(req.user.id);
+    
+    if (!user) {
+      return errorResponse(res, 'User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    // Ensure all fields are included in the response
+    const userData = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone || '',
+      profileImage: user.profileImage || '',
+      profileImageId: user.profileImageId || '',
+      bio: user.bio || '',
+      gender: user.gender || '',
+      dateOfBirth: user.dateOfBirth || '',
+      address: user.address || '',
+      role: user.role,
+      is_active: user.is_active,
+      is_verified: user.is_verified,
+      created_at: user.created_at,
+      updated_at: user.updated_at
+    };
+
+    return successResponse(res, 'User profile fetched successfully', userData, HTTP_STATUS.OK);
+  } catch (error) {
+    return errorResponse(
+      res, 
+      error.message, 
+      error.statusCode || HTTP_STATUS.BAD_REQUEST,
+      error.errors
+    );
+  }
 });
 
 // Update current user profile
@@ -45,19 +66,34 @@ const updateCurrentUser = asyncHandler(async (req, res) => {
     const updatedUser = await userService.updateCurrentUser(userId, { 
       name, email, phone, bio, gender, dateOfBirth, address 
     });
+
+    // Fetch fresh user data after update
+    const user = await User.findByPk(userId);
     
-    return successResponse(res, SUCCESS_MESSAGES.USER_UPDATED, {
-      id: updatedUser.id,
-      name: updatedUser.name,
-      email: updatedUser.email,
-      phone: updatedUser.phone,
-      profileImage: updatedUser.profileImage,
-      bio: updatedUser.bio,
-      gender: updatedUser.gender,
-      dateOfBirth: updatedUser.dateOfBirth,
-      address: updatedUser.address,
-      role: updatedUser.role
-    }, HTTP_STATUS.OK);
+    if (!user) {
+      return errorResponse(res, 'User not found after update', HTTP_STATUS.NOT_FOUND);
+    }
+    
+    // Return the same structure as getCurrentUser
+    const userData = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone || '',
+      profileImage: user.profileImage || '',
+      profileImageId: user.profileImageId || '',
+      bio: user.bio || '',
+      gender: user.gender || '',
+      dateOfBirth: user.dateOfBirth || '',
+      address: user.address || '',
+      role: user.role,
+      is_active: user.is_active,
+      is_verified: user.is_verified,
+      created_at: user.created_at,
+      updated_at: user.updated_at
+    };
+
+    return successResponse(res, SUCCESS_MESSAGES.USER_UPDATED, userData, HTTP_STATUS.OK);
   } catch (error) {
     return errorResponse(
       res, 
