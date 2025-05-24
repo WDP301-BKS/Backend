@@ -1,5 +1,13 @@
 const express = require('express');
-const { register, login, googleAuth, verifyEmail, resendVerification } = require('../controllers/auth.controller');
+const { 
+  register, 
+  login, 
+  googleAuth, 
+  verifyEmail, 
+  resendVerification,
+  requestPasswordReset,
+  resetPassword
+} = require('../controllers/auth.controller');
 const { validateRequest, schemas } = require('../middlewares/validation.middleware');
 const { authMiddleware } = require('../middlewares/auth.middleware');
 const { authService } = require('../services');
@@ -44,6 +52,20 @@ router.get('/verify/:token', async (req, res) => {
  * @access Public
  */
 router.post('/resend-verification', validateRequest(schemas.resendVerification), resendVerification);
+
+/**
+ * @route POST /api/auth/forgot-password
+ * @desc Request password reset email
+ * @access Public
+ */
+router.post('/forgot-password', validateRequest(schemas.forgotPassword), requestPasswordReset);
+
+/**
+ * @route POST /api/auth/reset-password
+ * @desc Reset password with token
+ * @access Public
+ */
+router.post('/reset-password', validateRequest(schemas.resetPassword), resetPassword);
 
 /**
  * @route POST /api/auth/google

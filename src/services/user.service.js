@@ -5,6 +5,9 @@ const {
   validationUtils, 
   passwordUtils 
 } = require('../common');
+const { uploadImage, deleteImage } = require('../config/cloudinaryConfig');
+const { sendPasswordResetEmail } = require('../utils/emailService');
+const crypto = require('crypto');
 const { ERROR_MESSAGES, HTTP_STATUS } = constants;
 const { 
   AppError, 
@@ -62,7 +65,7 @@ class UserService {
   }
   
   async updateCurrentUser(userId, updateData) {
-    const user = await this.findById(userId);
+    const user = await User.findByPk(userId);
     if (!user) {
       throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
     }
@@ -91,12 +94,143 @@ class UserService {
       throw new BadRequestError("Invalid Vietnamese phone number format");
     }
     
-    return await this.update(user, {
+    // Create update object
+    const userUpdate = {
       name: updateData.name || user.name,
       email: updateData.email || user.email,
-      password_hash: updateData.password || user.password_hash,
-      phone: updateData.phone || user.phone
+      phone: updateData.phone || user.phone,
+      bio: updateData.bio || user.bio,
+      gender: updateData.gender || user.gender,
+      dateOfBirth: updateData.dateOfBirth || user.dateOfBirth,
+      address: updateData.address || user.address
+    };
+    
+    // Only update password if provided
+    if (updateData.password) {
+      userUpdate.password_hash = updateData.password;
+    }
+    
+    // Update the user
+    const updatedUser = await this.update(user, userUpdate);
+    
+    return updatedUser;
+  }
+  
+  // Upload profile image
+  async uploadProfileImage(userId, fileBuffer) {
+    const user = await User.findByPk(userId);
+    if (!user) {
+      throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
+    }
+    
+    try {
+      // If user already has a profile image, delete it first
+      if (user.profileImageId) {
+        await deleteImage(user.profileImageId);
+      }
+      
+      // Upload new image to Cloudinary
+      const result = await uploadImage(fileBuffer, {
+        folder: 'profiles',
+        public_id: `user_${userId}_${Date.now()}`
+      });
+      
+      // Update user with new image URL and public ID
+      await this.update(user, {
+        profileImage: result.secure_url,
+        profileImageId: result.public_id
+      });
+      
+      return {
+        profileImage: result.secure_url,
+        profileImageId: result.public_id
+      };
+    } catch (error) {
+      console.error('Error uploading profile image:', error);
+      throw new AppError('Failed to upload profile image', HTTP_STATUS.INTERNAL_SERVER_ERROR);
+    }
+  }
+  
+  // Delete profile image
+  async deleteProfileImage(userId) {
+    const user = await User.findByPk(userId);
+    if (!user) {
+      throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
+    }
+    
+    if (!user.profileImageId) {
+      throw new BadRequestError('User does not have a profile image');
+    }
+    
+    try {
+      // Delete image from Cloudinary
+      await deleteImage(user.profileImageId);
+      
+      // Update user to remove image references
+      await this.update(user, {
+        profileImage: null,
+        profileImageId: null
+      });
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting profile image:', error);
+      throw new AppError('Failed to delete profile image', HTTP_STATUS.INTERNAL_SERVER_ERROR);
+    }
+  }
+  
+  // Request password reset
+  async requestPasswordReset(email) {
+    const user = await this.findByEmail(email);
+    if (!user) {
+      throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
+    }
+    
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    
+    // Update user with reset token
+    await this.update(user, {
+      reset_password_token: resetToken
     });
+    
+    // Generate reset link
+    const resetLink = `${process.env.FRONTEND_URL}/auth/reset-password/${resetToken}`;
+    
+    try {
+      // Send password reset email
+      await sendPasswordResetEmail(user.email, user.name, resetLink);
+      return { success: true, message: 'Password reset email sent' };
+    } catch (error) {
+      console.error('Failed to send password reset email:', error);
+      throw new AppError('Failed to send password reset email', HTTP_STATUS.INTERNAL_SERVER_ERROR);
+    }
+  }
+  
+  // Reset password with token
+  async resetPassword(token, newPassword) {
+    if (!validationUtils.isStrongPassword(newPassword)) {
+      throw new BadRequestError("Password must be at least 8 characters and include uppercase, lowercase, and numbers");
+    }
+    
+    // Find user with valid reset token
+    const user = await User.findOne({
+      where: {
+        reset_password_token: token
+      }
+    });
+    
+    if (!user || !user.reset_password_token) {
+      throw new BadRequestError('Invalid or expired password reset token');
+    }
+    
+    // Update user with new password and clear reset token
+    await this.update(user, {
+      password_hash: newPassword,
+      reset_password_token: null
+    });
+    
+    return { success: true, message: 'Password has been reset successfully' };
   }
   
   async getAllUsers(filters, pagination, sorting) {
@@ -128,7 +262,7 @@ class UserService {
   }
   
   async updateUserById(userId, updateData) {
-    const user = await this.findById(userId);
+    const user = await User.findByPk(userId);
     if (!user) {
       throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
     }

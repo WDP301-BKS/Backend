@@ -2,6 +2,26 @@
 
 Backend API service for the Football Field Booking platform. This application provides APIs for user authentication, field management, booking, and payment processing.
 
+## Features
+
+- User authentication (register, login, email verification)
+- User profile management
+- Field management for owners
+- Booking system for customers
+- Review and rating system
+- Admin dashboard for system management
+
+## New Features
+
+### Profile Management
+- Update profile information (name, email, phone, bio, gender, date of birth, address)
+- Upload and manage profile images with Cloudinary
+- Change password
+
+### Password Reset
+- Request password reset via email
+- Reset password with token
+
 ## Technologies Used
 
 - Node.js & Express.js
@@ -17,6 +37,7 @@ Backend API service for the Football Field Booking platform. This application pr
 - Node.js (v14 or higher)
 - PostgreSQL
 - npm or yarn
+- Cloudinary account (for image uploads)
 
 ## Getting Started
 
@@ -63,6 +84,23 @@ npm start
 
 The server will start on the port specified in the `.env` file (default: 5000).
 
+## Environment Variables
+
+Update your `.env` file with the following variables:
+
+```
+# Cloudinary Configuration
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
+
+# Email Configuration
+EMAIL_SERVICE=gmail
+EMAIL_USER=your_email@gmail.com
+EMAIL_PASS=your_app_password
+EMAIL_FROM=no-reply@football-booking.com
+```
+
 ## API Endpoints
 
 ### Authentication
@@ -71,11 +109,21 @@ The server will start on the port specified in the `.env` file (default: 5000).
 - `POST /api/auth/refresh-token` - Refresh authentication token
 - `POST /api/auth/google` - Google OAuth authentication
 - `GET /api/auth/verify-email/:token` - Verify user email
+- `GET /api/auth/verify/:token` - Verify email
+- `POST /api/auth/resend-verification` - Resend verification email
+- `POST /api/auth/forgot-password` - Request password reset
+- `POST /api/auth/reset-password` - Reset password with token
 
 ### User Management
 - `GET /api/users/profile` - Get user profile
 - `PUT /api/users/profile` - Update user profile
-- `PUT /api/users/change-password` - Change password
+- `POST /api/users/profile/image` - Upload profile image
+- `DELETE /api/users/profile/image` - Delete profile image
+- `POST /api/users/change-password` - Change password
+- `GET /api/users` - Get all users (admin only)
+- `GET /api/users/:id` - Get user by ID (admin only)
+- `PUT /api/users/:id` - Update user by ID (admin only)
+- `DELETE /api/users/:id` - Delete user (admin only)
 
 ### Field Management (Protected with admin rights)
 - `POST /api/fields` - Add a new field
@@ -149,4 +197,110 @@ npm start
 
 ## License
 
-[MIT License](LICENSE) 
+[MIT License](LICENSE)
+
+## Using the New Features
+
+### Profile Image Upload
+
+To upload a profile image:
+
+```javascript
+// Frontend code example
+const uploadProfileImage = async (file) => {
+  const formData = new FormData();
+  formData.append('image', file);
+  
+  try {
+    const response = await fetch('/api/users/profile/image', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}` // Your auth token
+      },
+      body: formData
+    });
+    
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error uploading profile image:', error);
+    throw error;
+  }
+};
+```
+
+### Updating Profile Information
+
+To update profile information:
+
+```javascript
+// Frontend code example
+const updateProfile = async (profileData) => {
+  try {
+    const response = await fetch('/api/users/profile', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}` // Your auth token
+      },
+      body: JSON.stringify(profileData)
+    });
+    
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    throw error;
+  }
+};
+```
+
+### Password Reset Flow
+
+1. User requests password reset:
+
+```javascript
+// Frontend code example
+const requestPasswordReset = async (email) => {
+  try {
+    const response = await fetch('/api/auth/forgot-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ email })
+    });
+    
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error requesting password reset:', error);
+    throw error;
+  }
+};
+```
+
+2. User receives email with reset link
+3. User clicks link and is redirected to reset password page
+4. User submits new password:
+
+```javascript
+// Frontend code example
+const resetPassword = async (token, newPassword) => {
+  try {
+    const response = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ token, newPassword })
+    });
+    
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error resetting password:', error);
+    throw error;
+  }
+};
+``` 

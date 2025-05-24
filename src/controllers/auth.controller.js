@@ -3,7 +3,7 @@ const {
   constants,
   errorHandler
 } = require('../common');
-const { authService } = require('../services');
+const { authService, userService } = require('../services');
 
 const { asyncHandler } = errorHandler;
 const { 
@@ -113,6 +113,63 @@ const resendVerification = asyncHandler(async (req, res) => {
   }
 });
 
+// Request password reset
+const requestPasswordReset = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    await userService.requestPasswordReset(email);
+    
+    // Always return success even if email not found for security reasons
+    return successResponse(
+      res, 
+      'If the email exists, a password reset link will be sent', 
+      null, 
+      HTTP_STATUS.OK
+    );
+  } catch (error) {
+    // Don't expose if the email doesn't exist
+    if (error.statusCode === HTTP_STATUS.NOT_FOUND) {
+      return successResponse(
+        res, 
+        'If the email exists, a password reset link will be sent', 
+        null, 
+        HTTP_STATUS.OK
+      );
+    }
+    
+    return errorResponse(
+      res, 
+      error.message, 
+      error.statusCode || HTTP_STATUS.BAD_REQUEST,
+      error.errors
+    );
+  }
+});
+
+// Reset password with token
+const resetPassword = asyncHandler(async (req, res) => {
+  const { token, newPassword } = req.body;
+
+  try {
+    const result = await userService.resetPassword(token, newPassword);
+    
+    return successResponse(
+      res, 
+      'Password has been reset successfully', 
+      null, 
+      HTTP_STATUS.OK
+    );
+  } catch (error) {
+    return errorResponse(
+      res, 
+      error.message, 
+      error.statusCode || HTTP_STATUS.BAD_REQUEST,
+      error.errors
+    );
+  }
+});
+
 // Google login or registration
 const googleAuth = asyncHandler(async (req, res) => {
   const { tokenId, profileObj } = req.body;
@@ -148,5 +205,7 @@ module.exports = {
   login,
   googleAuth,
   verifyEmail,
-  resendVerification
+  resendVerification,
+  requestPasswordReset,
+  resetPassword
 }; 

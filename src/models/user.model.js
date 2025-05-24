@@ -32,6 +32,24 @@ const User = sequelize.define('user', {
   phone: {
     type: DataTypes.STRING
   },
+  profileImage: {
+    type: DataTypes.STRING
+  },
+  profileImageId: {
+    type: DataTypes.STRING
+  },
+  bio: {
+    type: DataTypes.TEXT
+  },
+  gender: {
+    type: DataTypes.ENUM('male', 'female', 'other')
+  },
+  dateOfBirth: {
+    type: DataTypes.DATEONLY
+  },
+  address: {
+    type: DataTypes.STRING
+  },
   role: {
     type: DataTypes.ENUM(USER_ROLES.CUSTOMER, USER_ROLES.OWNER, USER_ROLES.ADMIN),
     defaultValue: USER_ROLES.CUSTOMER
@@ -42,6 +60,23 @@ const User = sequelize.define('user', {
   },
   verification_token: {
     type: DataTypes.STRING
+  },
+  reset_password_token: {
+    type: DataTypes.STRING(128),
+    get() {
+      const token = this.getDataValue('reset_password_token');
+      if (token) {
+        const tokenCreatedAt = new Date(this.updated_at);
+        const now = new Date();
+        const hoursSinceCreation = (now - tokenCreatedAt) / (1000 * 60 * 60);
+        
+        if (hoursSinceCreation > 1) {
+          this.update({ reset_password_token: null });
+          return null;
+        }
+      }
+      return token;
+    }
   },
   is_verified: {
     type: DataTypes.BOOLEAN,
