@@ -15,8 +15,8 @@ const { sequelize, testDbConnection } = require('../config/db.config');
 
 // Define relationships
 // User relationships
-User.hasMany(Field, { foreignKey: 'owner_id' });
-Field.belongsTo(User, { foreignKey: 'owner_id' });
+User.hasMany(Field, { foreignKey: 'owner_id', as: 'ownedFields' });
+Field.belongsTo(User, { foreignKey: 'owner_id', as: 'owner' });
 
 User.hasMany(Booking, { foreignKey: 'user_id' });
 Booking.belongsTo(User, { foreignKey: 'user_id' });
