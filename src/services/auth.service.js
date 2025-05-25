@@ -21,10 +21,10 @@ const {
 
 class AuthService {
   // Repository methods integrated directly into service
-  async findByEmail(email) {
+  async findByEmail(email, shouldThrow = false) {
     const user = await User.findOne({ where: { email } });
     
-    if (!user) {
+    if (!user && shouldThrow) {
       throw new NotFoundError('User not found');
     }
     
@@ -123,9 +123,7 @@ class AuthService {
       console.error('Failed to send verification email:', error);
     }
 
-    // Generate token
-    const token = jwtUtils.generateToken({ id: user.id }, CONFIG.JWT_EXPIRATION);
-
+    // Return user info without token - user must verify email before getting token
     return {
       user: {
         id: user.id,
@@ -134,7 +132,7 @@ class AuthService {
         role: user.role,
         is_verified: user.is_verified
       },
-      token,
+      message: 'Registration successful. Please check your email to verify your account before logging in.',
       emailSent: true
     };
   }
@@ -148,12 +146,8 @@ class AuthService {
       throw new BadRequestError("Invalid email format");
     }
 
-    // Find user by email
-    const user = await this.findByEmail(email);
-    
-    if (!user) {
-      throw new NotFoundError(ERROR_MESSAGES.USER_NOT_FOUND);
-    }
+    // Find user by email - should throw error if not found during login
+    const user = await this.findByEmail(email, true);
 
     // Check if account is verified
     if (!user.is_verified) {
@@ -237,7 +231,7 @@ class AuthService {
     await user.save();
     
     // Generate verification link
-    const verificationLink = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+    const verificationLink = `${process.env.BACKEND_URL}/api/auth/verify/${verificationToken}`;
     
     // Send verification email - handle errors
     try {
