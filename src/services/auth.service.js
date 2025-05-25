@@ -22,7 +22,13 @@ const {
 class AuthService {
   // Repository methods integrated directly into service
   async findByEmail(email) {
-    return await User.findOne({ where: { email } });
+    const user = await User.findOne({ where: { email } });
+    
+    if (!user) {
+      throw new NotFoundError('User not found');
+    }
+    
+    return user;
   }
 
   async findByVerificationToken(token) {

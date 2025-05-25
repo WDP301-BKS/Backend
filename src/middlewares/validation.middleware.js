@@ -70,6 +70,20 @@ const schemas = {
   resetPassword: Joi.object({
     token: Joi.string().required(),
     newPassword: Joi.string().min(6).required()
+  }),
+  
+  updateOwner: Joi.object({
+    name: Joi.string().min(2).max(100),
+    email: Joi.string().email(),
+    phone: Joi.string().pattern(/^[0-9]{10,11}$/),
+    bio: Joi.string().max(500),
+    gender: Joi.string().valid('male', 'female', 'other'),
+    dateOfBirth: Joi.date().iso(),
+    address: Joi.string().max(200)
+  }),
+
+  checkGoogleAccount: Joi.object({
+    email: Joi.string().email().required()
   })
 };
 
