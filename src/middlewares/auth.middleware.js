@@ -58,7 +58,7 @@ const isAdmin = (req, res, next) => {
 };
 
 const isOwner = (req, res, next) => {
-  if (req.user && (req.user.role === USER_ROLES.OWNER || req.user.role === USER_ROLES.ADMIN)) {
+  if (req.user && req.user.role === USER_ROLES.OWNER) {
     next();
   } else {
     return forbiddenResponse(res, ERROR_MESSAGES.FORBIDDEN);
@@ -84,7 +84,6 @@ const isOwnerOrAdmin = (req, res, next) => {
 module.exports = {
   authMiddleware,
   isAdmin,
-  isOwner,
   isCustomer,
-  isOwnerOrAdmin
+  isOwner
 }; 

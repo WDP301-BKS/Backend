@@ -6,7 +6,8 @@ const {
   verifyEmail, 
   resendVerification,
   requestPasswordReset,
-  resetPassword
+  resetPassword,
+  checkGoogleAccount
 } = require('../controllers/auth.controller');
 const { validateRequest, schemas } = require('../middlewares/validation.middleware');
 const { authMiddleware } = require('../middlewares/auth.middleware');
@@ -73,6 +74,13 @@ router.post('/reset-password', validateRequest(schemas.resetPassword), resetPass
  * @access Public
  */
 router.post('/google', validateRequest(schemas.googleAuth), googleAuth);
+
+/**
+ * @route POST /api/auth/check-google-account
+ * @desc Check if Google account exists and get role
+ * @access Public
+ */
+router.post('/check-google-account', validateRequest(schemas.checkGoogleAccount), checkGoogleAccount);
 
 /**
  * @route GET /api/auth/me

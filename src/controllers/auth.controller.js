@@ -200,6 +200,33 @@ const googleAuth = asyncHandler(async (req, res) => {
   }
 });
 
+// Check Google account existence and role
+const checkGoogleAccount = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const user = await authService.findByEmail(email);
+    
+    if (!user) {
+      return errorResponse(res, 'User not found', HTTP_STATUS.NOT_FOUND);
+    }
+
+    return successResponse(res, 'User found', {
+      email: user.email,
+      role: user.role,
+      name: user.name,
+      profileImage: user.profileImage
+    });
+  } catch (error) {
+    return errorResponse(
+      res, 
+      error.message, 
+      error.statusCode || HTTP_STATUS.BAD_REQUEST,
+      error.errors
+    );
+  }
+});
+
 module.exports = {
   register,
   login,
@@ -207,5 +234,6 @@ module.exports = {
   verifyEmail,
   resendVerification,
   requestPasswordReset,
-  resetPassword
+  resetPassword,
+  checkGoogleAccount
 }; 
