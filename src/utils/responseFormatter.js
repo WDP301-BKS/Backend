@@ -77,4 +77,36 @@ exports.forbidden = (message = 'Access forbidden') => {
 exports.notFound = (message = 'Resource not found') => {
   logger.debug('Response formatter: Not found', { message });
   return exports.error(message, 404);
+};
+
+/**
+ * Format successful response
+ * @param {*} data - Response data
+ * @returns {Object} Formatted response object
+ */
+const success = (data) => ({
+    success: true,
+    data
+});
+
+/**
+ * Format error response
+ * @param {Object} error - Error object
+ * @param {string} error.code - Error code
+ * @param {string} error.message - Error message
+ * @param {Object} [error.details] - Additional error details
+ * @returns {Object} Formatted error object
+ */
+const error = ({ code, message, details }) => ({
+    success: false,
+    error: {
+        code,
+        message,
+        ...(details && { details })
+    }
+});
+
+module.exports = {
+    success,
+    error
 }; 
