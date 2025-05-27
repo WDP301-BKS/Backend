@@ -1,6 +1,7 @@
 const { Field, User, Location, SubField } = require('../models');
-const { ValidationError } = require('sequelize');
+const { ValidationError, Op, Sequelize } = require('sequelize');
 const responseFormatter = require('../utils/responseFormatter');
+const sequelize = require('sequelize');
 
 // Get all fields without pagination
 const getAllFields = async (req, res) => {
@@ -233,9 +234,83 @@ const getFieldDetail = async (req, res) => {
     }
 };
 
+// Search fields by name
+const searchFields = async (req, res) => {
+    try {
+        let { name } = req.query;
+        
+        if (!name) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'VALIDATION_ERROR',
+                    message: 'Vui lòng nhập tên sân cần tìm'
+                }
+            });
+        }
+
+        // Chuẩn hóa chuỗi tìm kiếm
+        name = decodeURIComponent(name).trim();
+        console.log('Search term after decode:', name);
+
+        const fields = await Field.findAll({
+            where: {
+                name: {
+                    [Op.iLike]: `%${name}%`
+                }
+            },
+            include: [
+                {
+                    model: Location,
+                    attributes: ['address_text', 'city', 'district', 'ward']
+                },
+                {
+                    model: User,
+                    as: 'owner',
+                    attributes: ['id', 'name', 'phone']
+                },
+                {
+                    model: SubField,
+                    attributes: ['id', 'name', 'field_type']
+                }
+            ],
+            attributes: [
+                'id', 
+                'name', 
+                'description', 
+                'price_per_hour', 
+                'images1', 
+                'images2', 
+                'images3', 
+                'is_verified', 
+                'created_at'
+            ],
+            order: [['created_at', 'DESC']]
+        });
+
+        console.log('Found fields:', fields.map(f => f.name));
+
+        return res.json({
+            success: true,
+            data: fields
+        });
+    } catch (error) {
+        console.error('Error in searchFields:', error);
+        return res.status(500).json({
+            success: false,
+            error: {
+                code: 'INTERNAL_SERVER_ERROR',
+                message: 'Đã có lỗi xảy ra khi tìm kiếm sân',
+                details: error.message
+            }
+        });
+    }
+};
+
 module.exports = {
     getAllFields,
     getFields,
     addField,
-    getFieldDetail
+    getFieldDetail,
+    searchFields
 }; 
