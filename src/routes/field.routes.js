@@ -4,6 +4,7 @@ const fieldController = require('../controllers/field.controller');
 const { authMiddleware, isOwner } = require('../middlewares/auth.middleware');
 
 // Public routes
+router.get('/search', fieldController.searchFields);
 router.get('/all', fieldController.getAllFields);
 router.get('/', fieldController.getFields);
 router.get('/:id', fieldController.getFieldDetail);
