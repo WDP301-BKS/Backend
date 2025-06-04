@@ -5,6 +5,8 @@ const ownerRoutes = require('./owner.routes');
 const fieldRoutes = require('./field.routes');
 const chatRoutes = require('./chat.routes');
 const favorite = require('./favorite.routes');
+const reviewRoutes = require('./review.routes');
+
 const router = express.Router();
 
 // Mount auth routes
@@ -22,4 +24,6 @@ router.use('/fields', fieldRoutes);
 router.use('/chats', chatRoutes);
 
 router.use('/favorites', favorite);
-module.exports = router; 
+router.use('/reviews', reviewRoutes);
+
+module.exports = router;
