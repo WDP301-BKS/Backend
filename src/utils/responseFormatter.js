@@ -80,33 +80,21 @@ exports.notFound = (message = 'Resource not found') => {
 };
 
 /**
- * Format successful response
- * @param {*} data - Response data
- * @returns {Object} Formatted response object
+ * Format a conflict error response
+ * @param {string} message - Error message
+ * @returns {Object} Formatted conflict error response
  */
-const success = (data) => ({
-    success: true,
-    data
-});
+exports.conflict = (message = 'Resource conflict') => {
+  logger.debug('Response formatter: Conflict', { message });
+  return exports.error(message, 409);
+};
 
 /**
- * Format error response
- * @param {Object} error - Error object
- * @param {string} error.code - Error code
- * @param {string} error.message - Error message
- * @param {Object} [error.details] - Additional error details
- * @returns {Object} Formatted error object
+ * Format a server error response
+ * @param {string} message - Error message
+ * @returns {Object} Formatted server error response
  */
-const error = ({ code, message, details }) => ({
-    success: false,
-    error: {
-        code,
-        message,
-        ...(details && { details })
-    }
-});
-
-module.exports = {
-    success,
-    error
-}; 
+exports.serverError = (message = 'Internal server error') => {
+  logger.debug('Response formatter: Server error', { message });
+  return exports.error(message, 500);
+};

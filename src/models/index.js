@@ -75,8 +75,9 @@ Message.belongsTo(Chat, { foreignKey: 'chat_id' });
 // Function to sync all models with the database
 const syncModels = async () => {
   try {
-    await sequelize.sync();
-    console.log('All models were synchronized successfully.');
+    const forceSync = process.env.DB_FORCE_SYNC === 'true';
+    await sequelize.sync({ force: forceSync });
+    console.log(`All models were synchronized successfully. Force sync: ${forceSync}`);
   } catch (error) {
     console.error('Failed to sync models:', error);
   }

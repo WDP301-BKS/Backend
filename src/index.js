@@ -1,12 +1,14 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const http = require('http');
 const { errorHandler } = require('./common');
 const { globalErrorHandler } = errorHandler;
 const logger = require('./utils/logger');
 const requestLoggerMiddleware = require('./middlewares/requestLogger');
 const requestIdMiddleware = require('./middlewares/requestId');
 const responseFormatter = require('./utils/responseFormatter');
+const { initializeSocket } = require('./config/socket.config');
 
 // Load environment variables
 dotenv.config();
@@ -20,9 +22,15 @@ const routes = require('./routes');
 // Initialize express app
 const app = express();
 
+// Create HTTP server
+const server = http.createServer(app);
+
+// Initialize Socket.IO
+const io = initializeSocket(server);
+
 // CORS Configuration
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: process.env.FRONTEND_URL,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-correlation-id'],
   exposedHeaders: ['x-correlation-id'],
@@ -90,11 +98,11 @@ const startServer = async () => {
     // Sync all models with the database
     await syncModels();
     logger.info('Models synchronized with database');
-    
-    // Start the server
-    app.listen(PORT, () => {
+      // Start the server
+    server.listen(PORT, () => {
       logger.info(`Server is running on port ${PORT}`);
-      logger.info(`CORS enabled for: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
+      logger.info(`Socket.IO server initialized`);
+      logger.info(`CORS enabled for: ${process.env.FRONTEND_URL}`);
     });
   } catch (error) {
     logger.error('Failed to start server:', error);
