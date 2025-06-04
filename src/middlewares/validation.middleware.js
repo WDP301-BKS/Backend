@@ -84,6 +84,14 @@ const schemas = {
 
   checkGoogleAccount: Joi.object({
     email: Joi.string().email().required()
+  }),
+  // Chat validation schemas
+  createChat: Joi.object({
+    otherUserId: Joi.string().uuid().required()
+  }),
+
+  sendMessage: Joi.object({
+    content: Joi.string().min(1).max(1000).required()
   })
 };
 

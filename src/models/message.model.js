@@ -10,14 +10,22 @@ const Message = sequelize.define('message', {
   sender_id: {
     type: DataTypes.UUID,
     allowNull: false
-  },
-  content: {
+  },  content: {
     type: DataTypes.STRING,
     allowNull: false
   },
   chat_id: {
     type: DataTypes.UUID,
     allowNull: false
+  },
+  is_read: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    allowNull: false
+  },
+  read_at: {
+    type: DataTypes.DATE,
+    allowNull: true
   }
 }, {
   timestamps: true,
