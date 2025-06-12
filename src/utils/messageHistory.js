@@ -1,8 +1,7 @@
 /**
- * In-memory message history manager
- * Stores recent messages for each chat room
+ * Message history service for chat functionality
+ * Handles database operations for chat messages
  */
-
 const { Message, User } = require('../models');
 const { Op } = require('sequelize');
 
@@ -115,18 +114,21 @@ class MessageHistoryManager {
             model: User,
             as: 'sender',
             attributes: ['id', 'name', 'profileImage']
-          }        ],
+          }
+        ],
         order: [['created_at', 'DESC']],
         limit,
         raw: false
-      });      return messages.reverse().map(msg => ({
+      });
+
+      return messages.reverse().map(msg => ({
         id: msg.id,
         chat_id: msg.chat_id,
         sender_id: msg.sender_id,
         content: msg.content,
         message_type: msg.message_type,
         createdAt: msg.created_at,
-        updatedAt: msg.update_at,
+        updatedAt: msg.updated_at,
         is_read: msg.is_read,
         sender: msg.sender ? {
           id: msg.sender.id,
@@ -200,7 +202,8 @@ class MessageHistoryManager {
   async getMessagesWithPagination(chatId, page = 1, limit = 20, beforeMessageId = null) {
     try {
       const whereCondition = { chat_id: chatId };
-        if (beforeMessageId) {
+      
+      if (beforeMessageId) {
         const beforeMessage = await Message.findByPk(beforeMessageId);
         if (beforeMessage) {
           whereCondition.created_at = { [Op.lt]: beforeMessage.created_at };
@@ -216,19 +219,22 @@ class MessageHistoryManager {
             model: User,
             as: 'sender',
             attributes: ['id', 'name', 'profileImage']
-          }        ],
+          }
+        ],
         order: [['created_at', 'DESC']],
         limit,
         offset,
         raw: false
-      });      const formattedMessages = messages.reverse().map(msg => ({
+      });
+
+      const formattedMessages = messages.reverse().map(msg => ({
         id: msg.id,
         chat_id: msg.chat_id,
         sender_id: msg.sender_id,
         content: msg.content,
         message_type: msg.message_type,
         createdAt: msg.created_at,
-        updatedAt: msg.update_at,
+        updatedAt: msg.updated_at,
         is_read: msg.is_read,
         sender: msg.sender ? {
           id: msg.sender.id,
