@@ -125,5 +125,6 @@ module.exports = {
   isAdmin,
   isCustomer,
   isOwner,
-  optionalAuthMiddleware
+  optionalAuthMiddleware,
+  isOwnerOrAdmin
 };
