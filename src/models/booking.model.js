@@ -12,7 +12,7 @@ const Booking = sequelize.define('booking', {
     allowNull: false
   },
   status: {
-    type: DataTypes.ENUM('pending', 'confirmed', 'cancelled', 'completed'),
+    type: DataTypes.ENUM('pending', 'confirmed', 'cancelled', 'completed', 'payment_pending'),
     defaultValue: 'pending'
   },
   total_price: {
@@ -20,17 +20,27 @@ const Booking = sequelize.define('booking', {
     allowNull: false
   },
   payment_status: {
-    type: DataTypes.ENUM('pending', 'paid', 'failed', 'refunded'),
+    type: DataTypes.ENUM('pending', 'paid', 'failed', 'refunded', 'processing'),
     defaultValue: 'pending'
+  },
+  payment_due_date: {
+    type: DataTypes.DATE,
+    allowNull: true
   },
   user_id: {
     type: DataTypes.UUID,
-    allowNull: false
+    allowNull: false // Now required for all bookings
+  },
+  customer_info: {
+    type: DataTypes.JSON // Store customer details
+  },
+  booking_metadata: {
+    type: DataTypes.JSON // Store additional booking info
   }
 }, {
   timestamps: true,
   createdAt: 'created_at',
-  updatedAt: false
+  updatedAt: 'updated_at'
 });
 
 module.exports = Booking; 

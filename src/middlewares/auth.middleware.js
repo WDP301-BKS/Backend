@@ -81,9 +81,49 @@ const isOwnerOrAdmin = (req, res, next) => {
   }
 };
 
+// Optional auth middleware - doesn't require authentication but adds user info if available
+const optionalAuthMiddleware = asyncHandler(async (req, res, next) => {
+  const token = extractTokenFromHeader(req);
+  
+  if (!token) {
+    // No token provided, continue without user info
+    req.user = null;
+    return next();
+  }
+
+  try {
+    const decoded = verifyToken(token);
+    const user = await User.findByPk(decoded.id, {
+      attributes: { exclude: ['password_hash'] }
+    });
+    
+    if (user && user.is_active) {
+      req.user = {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone,
+        is_active: user.is_active,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      };
+    } else {
+      req.user = null;
+    }
+    
+    next();
+  } catch (error) {
+    // Token invalid, continue without user info
+    req.user = null;
+    next();
+  }
+});
+
 module.exports = {
   authMiddleware,
   isAdmin,
   isCustomer,
-  isOwner
-}; 
+  isOwner,
+  optionalAuthMiddleware
+};

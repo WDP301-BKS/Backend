@@ -29,7 +29,8 @@ app.use(cors({
   credentials: true
 }));
 
-// Middleware
+// Middleware - but exclude webhook route from JSON parsing
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -50,7 +51,7 @@ app.get('/', (req, res) => {
 // Handle 404
 app.use((req, res) => {
   res.status(404).json(
-    responseFormatter.notFound(`Route ${req.originalUrl} not found`)
+    responseFormatter.error(`Route ${req.originalUrl} not found`, 404)
   );
   logger.warn(`404 - Route not found: ${req.originalUrl}`, { correlationId: req.correlationId });
 });
@@ -68,17 +69,18 @@ app.use((err, req, res, next) => {
   });
   
   // Format the error response
+  const statusCode = err.statusCode || 500;
   const errorResponse = responseFormatter.error(
     err.message || 'Internal Server Error',
-    err.statusCode || 500,
+    statusCode,
     err.errors
   );
   
-  res.status(errorResponse.statusCode).json(errorResponse);
+  res.status(statusCode).json(errorResponse);
 });
 
 // Server setup
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 // Test DB connection and sync models
 const startServer = async () => {
@@ -90,6 +92,24 @@ const startServer = async () => {
     // Sync all models with the database
     await syncModels();
     logger.info('Models synchronized with database');
+    
+    // Start periodic cleanup for expired bookings
+    const dbOptimizer = require('./utils/dbOptimizer');
+    const cleanupInterval = dbOptimizer.startPeriodicCleanup();
+    logger.info('Started periodic cleanup for expired bookings');
+    
+    // Handle graceful shutdown
+    process.on('SIGTERM', () => {
+      logger.info('SIGTERM received, shutting down gracefully');
+      clearInterval(cleanupInterval);
+      process.exit(0);
+    });
+    
+    process.on('SIGINT', () => {
+      logger.info('SIGINT received, shutting down gracefully');
+      clearInterval(cleanupInterval);
+      process.exit(0);
+    });
     
     // Start the server
     app.listen(PORT, () => {

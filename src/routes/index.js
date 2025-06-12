@@ -3,6 +3,8 @@ const authRoutes = require('./auth.routes');
 const userRoutes = require('./user.routes');
 const ownerRoutes = require('./owner.routes');
 const fieldRoutes = require('./field.routes');
+const bookingRoutes = require('./booking.routes');
+const paymentRoutes = require('./payment.routes');
 
 const router = express.Router();
 
@@ -14,7 +16,14 @@ router.use('/users', userRoutes);
 
 // Mount owner routes
 router.use('/owners', ownerRoutes);
+
 // Mount field routes
 router.use('/fields', fieldRoutes);
+
+// Mount booking routes
+router.use('/bookings', bookingRoutes);
+
+// Mount payment routes
+router.use('/payments', paymentRoutes);
 
 module.exports = router; 
