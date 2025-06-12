@@ -16,4 +16,10 @@ router.get('/:id', fieldController.getFieldDetail);
 // Protected routes (require authentication)
 router.post('/', authMiddleware, isOwner, fieldController.addField);
 
+// New routes for package system
+router.get('/check/create-condition', authMiddleware, isOwner, fieldController.checkPackageBeforeCreate);
+router.post('/create-with-check', authMiddleware, isOwner, fieldController.createFieldWithPackageCheck);
+router.post('/upload-documents', authMiddleware, isOwner, fieldController.uploadDocuments);
+router.get('/owner/my-fields', authMiddleware, isOwner, fieldController.getOwnerFields);
+
 module.exports = router;

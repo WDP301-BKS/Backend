@@ -9,6 +9,8 @@ const reviewRoutes = require('./review.routes');
 const bookingRoutes = require('./booking.routes');
 const paymentRoutes = require('./payment.routes');
 const timeSlotRoutes = require('./timeslot.routes');
+const packageRoutes = require('./package.routes');
+const adminRoutes = require('./admin.routes');
 
 const router = express.Router();
 
@@ -29,6 +31,8 @@ router.use('/chats', chatRoutes);
 
 router.use('/favorites', favorite);
 router.use('/reviews', reviewRoutes);
+router.use('/packages', packageRoutes);
+router.use('/admin', adminRoutes);
 
 // Mount booking routes
 router.use('/bookings', bookingRoutes);

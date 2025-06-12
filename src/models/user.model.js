@@ -81,7 +81,31 @@ const User = sequelize.define('user', {
   is_verified: {
     type: DataTypes.BOOLEAN,
     defaultValue: false
-  }
+  },
+  // Các trường mới cho gói dịch vụ
+  package_type: {
+      type: DataTypes.ENUM('basic', 'premium', 'none'),
+      defaultValue: 'none',
+      allowNull: false
+  },
+  package_purchase_date: {
+      type: DataTypes.DATE,
+      allowNull: true
+  },
+  business_license_image: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      validate: {
+          isUrl: true
+      }
+  },
+  identity_card_image: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      validate: {
+          isUrl: true
+      }
+  } 
 }, {
   timestamps: true,
   createdAt: 'created_at',
