@@ -31,7 +31,23 @@ const TimeSlot = sequelize.define('timeslot', {
     defaultValue: true
   }
 }, {
-  timestamps: false
+  timestamps: false,
+  indexes: [
+    {
+      // Unique constraint to prevent double booking
+      unique: true,
+      fields: ['sub_field_id', 'date', 'start_time', 'end_time'],
+      where: {
+        is_available: false
+      },
+      name: 'unique_booked_timeslot'
+    },
+    {
+      // Performance index for availability queries
+      fields: ['sub_field_id', 'date', 'is_available'],
+      name: 'timeslot_availability_index'
+    }
+  ]
 });
 
 module.exports = TimeSlot; 

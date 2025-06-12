@@ -23,19 +23,36 @@ exports.success = (data, message = 'Success', statusCode = 200) => {
 
 /**
  * Format an error response
- * @param {string} message - Error message
- * @param {number} statusCode - HTTP status code
- * @param {*} errors - Additional error details
+ * @param {string|Object} message - Error message or options object
+ * @param {number} statusCode - HTTP status code (when first param is string)
+ * @param {*} errors - Additional error details (when first param is string)
  * @returns {Object} Formatted error response
  */
 exports.error = (message = 'An error occurred', statusCode = 500, errors = null) => {
-  logger.debug('Response formatter: Error', { message, statusCode });
-  return {
-    success: false,
-    message,
-    statusCode,
-    errors
-  };
+  // Support both old format and new object format
+  if (typeof message === 'object' && message !== null) {
+    // New object format: { code, message, details }
+    const { code = 500, message: msg = 'An error occurred', details = null } = message;
+    logger.debug('Response formatter: Error (object format)', { message: msg, statusCode: code });
+    return {
+      success: false,
+      message: msg,
+      statusCode: code,
+      error: {
+        message: msg,
+        details
+      }
+    };
+  } else {
+    // Old format: (message, statusCode, errors)
+    logger.debug('Response formatter: Error (legacy format)', { message, statusCode });
+    return {
+      success: false,
+      message,
+      statusCode,
+      errors
+    };
+  }
 };
 
 /**

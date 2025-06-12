@@ -7,11 +7,23 @@ class SocketRateLimiter {
     
     // Configuration for different event types
     this.limits = {
+      // Chat events
       'join_chat': { maxRequests: 10, window: 60000 }, // 10 requests per minute
       'leave_chat': { maxRequests: 10, window: 60000 },
       'typing_start': { maxRequests: 30, window: 60000 }, // 30 requests per minute
       'typing_stop': { maxRequests: 30, window: 60000 },
       'send_message': { maxRequests: 20, window: 60000 }, // 20 messages per minute
+      'load_more_messages': { maxRequests: 15, window: 60000 }, // 15 requests per minute
+      'mark_messages_read': { maxRequests: 30, window: 60000 }, // 30 requests per minute
+      'get_user_online_status': { maxRequests: 20, window: 60000 }, // 20 requests per minute
+      'update_online_status': { maxRequests: 10, window: 60000 }, // 10 requests per minute
+      
+      // Booking events
+      'subscribe_booking': { maxRequests: 15, window: 60000 }, // 15 subscriptions per minute
+      'unsubscribe_booking': { maxRequests: 15, window: 60000 }, // 15 unsubscriptions per minute
+      'sync_booking_status': { maxRequests: 5, window: 60000 }, // 5 sync requests per minute (more restrictive)
+      
+      // Default fallback
       'default': { maxRequests: 50, window: 60000 } // Default limit
     };
     
@@ -106,6 +118,40 @@ class SocketRateLimiter {
     }
     
     return Math.max(0, limit.maxRequests - eventData.count);
+  }
+
+  /**
+   * Add a new rate limit configuration
+   * @param {string} eventName 
+   * @param {number} maxRequests 
+   * @param {number} window 
+   */
+  addLimit(eventName, maxRequests, window) {
+    this.limits[eventName] = { maxRequests, window };
+  }
+
+  /**
+   * Remove rate limit configuration
+   * @param {string} eventName 
+   */
+  removeLimit(eventName) {
+    delete this.limits[eventName];
+  }
+
+  /**
+   * Get current statistics
+   * @returns {Object}
+   */
+  getStats() {
+    const activeUsers = this.userLimits.size;
+    const totalEvents = Array.from(this.userLimits.values())
+      .reduce((total, userEvents) => total + userEvents.size, 0);
+    
+    return {
+      activeUsers,
+      totalEvents,
+      eventTypes: Object.keys(this.limits)
+    };
   }
 }
 

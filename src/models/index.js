@@ -3,6 +3,7 @@ const Field = require('./field.model');
 const SubField = require('./subfield.model');
 const Location = require('./location.model');
 const Booking = require('./booking.model');
+const Payment = require('./payment.model');
 const TimeSlot = require('./timeslot.model');
 const Promotion = require('./promotion.model');
 const Review = require('./review.model');
@@ -19,7 +20,7 @@ User.hasMany(Field, { foreignKey: 'owner_id', as: 'ownedFields' });
 Field.belongsTo(User, { foreignKey: 'owner_id', as: 'owner' });
 
 User.hasMany(Booking, { foreignKey: 'user_id' });
-Booking.belongsTo(User, { foreignKey: 'user_id' });
+Booking.belongsTo(User, { foreignKey: 'user_id', required: false }); // Allow null for guest bookings
 
 User.hasMany(Review, { foreignKey: 'user_id' });
 Review.belongsTo(User, { foreignKey: 'user_id' });
@@ -68,6 +69,10 @@ TimeSlot.belongsTo(SubField, { foreignKey: 'sub_field_id' });
 Booking.hasMany(TimeSlot, { foreignKey: 'booking_id' });
 TimeSlot.belongsTo(Booking, { foreignKey: 'booking_id' });
 
+// Payment relationships
+Booking.hasOne(Payment, { foreignKey: 'booking_id' });
+Payment.belongsTo(Booking, { foreignKey: 'booking_id' });
+
 // Chat and Message relationships
 Chat.hasMany(Message, { foreignKey: 'chat_id' });
 Message.belongsTo(Chat, { foreignKey: 'chat_id' });
@@ -89,6 +94,7 @@ module.exports = {
   SubField,
   Location,
   Booking,
+  Payment,
   TimeSlot,
   Promotion,
   Review,

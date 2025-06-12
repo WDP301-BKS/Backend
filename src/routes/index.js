@@ -6,6 +6,8 @@ const fieldRoutes = require('./field.routes');
 const chatRoutes = require('./chat.routes');
 const favorite = require('./favorite.routes');
 const reviewRoutes = require('./review.routes');
+const bookingRoutes = require('./booking.routes');
+const paymentRoutes = require('./payment.routes');
 
 const router = express.Router();
 
@@ -17,6 +19,7 @@ router.use('/users', userRoutes);
 
 // Mount owner routes
 router.use('/owners', ownerRoutes);
+
 // Mount field routes
 router.use('/fields', fieldRoutes);
 
@@ -26,4 +29,10 @@ router.use('/chats', chatRoutes);
 router.use('/favorites', favorite);
 router.use('/reviews', reviewRoutes);
 
-module.exports = router;
+// Mount booking routes
+router.use('/bookings', bookingRoutes);
+
+// Mount payment routes
+router.use('/payments', paymentRoutes);
+
+module.exports = router; 
