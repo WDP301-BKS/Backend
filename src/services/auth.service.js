@@ -113,7 +113,7 @@ class AuthService {
     });
 
     // Generate verification link
-    const verificationLink = `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/auth/verify/${verificationToken}`;
+    const verificationLink = `${process.env.BACKEND_URL || 'http://localhost:5001'}/api/auth/verify/${verificationToken}`;
     
     // Send verification email - handle errors without failing registration
     try {

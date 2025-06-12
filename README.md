@@ -82,7 +82,7 @@ npm run dev
 npm start
 ```
 
-The server will start on the port specified in the `.env` file (default: 5000).
+The server will start on the port specified in the `.env` file (default: 5001).
 
 ## Environment Variables
 
