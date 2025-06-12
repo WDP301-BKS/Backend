@@ -3,6 +3,8 @@
  * Manages booking room subscriptions and notifications
  */
 
+const { Chat, User } = require('../models');
+
 class RoomManager {
   constructor() {
     this.rooms = new Map();
@@ -17,11 +19,8 @@ class RoomManager {
    */
   subscribeToBooking(userId, bookingId, socket) {
     const roomName = `booking:${bookingId}`;
-    
-    // Join the room
     socket.join(roomName);
     
-    // Track subscription
     if (!this.bookingSubscribers.has(bookingId)) {
       this.bookingSubscribers.set(bookingId, new Map());
     }
@@ -32,7 +31,6 @@ class RoomManager {
     });
     
     console.log(`User ${userId} subscribed to booking ${bookingId}`);
-    
     return roomName;
   }
 
@@ -44,15 +42,11 @@ class RoomManager {
    */
   unsubscribeFromBooking(userId, bookingId, socket) {
     const roomName = `booking:${bookingId}`;
-    
-    // Leave the room
     socket.leave(roomName);
     
-    // Remove subscription
     if (this.bookingSubscribers.has(bookingId)) {
       this.bookingSubscribers.get(bookingId).delete(userId);
       
-      // Clean up empty maps
       if (this.bookingSubscribers.get(bookingId).size === 0) {
         this.bookingSubscribers.delete(bookingId);
       }
@@ -106,7 +100,6 @@ class RoomManager {
   addUserToRoom(roomName, userId) {
     const room = this.createOrGetRoom(roomName);
     room.users.add(userId);
-    
     return room;
   }
 
@@ -120,7 +113,6 @@ class RoomManager {
       const room = this.rooms.get(roomName);
       room.users.delete(userId);
       
-      // Clean up empty rooms
       if (room.users.size === 0) {
         this.rooms.delete(roomName);
       }
@@ -135,6 +127,58 @@ class RoomManager {
     return this.rooms;
   }
   
+  /**
+   * Get chat by ID
+   * @param {string} chatId - Chat ID
+   * @returns {object|null} Chat object or null
+   */
+  async getChat(chatId) {
+    try {
+      const chat = await Chat.findByPk(chatId);
+      return chat;
+    } catch (error) {
+      console.error('Error getting chat:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get chat participants
+   * @param {string} chatId - Chat ID
+   * @returns {Array} Array of participant user objects
+   */
+  async getChatParticipants(chatId) {
+    try {
+      const chat = await Chat.findByPk(chatId, {
+        include: [
+          {
+            model: User,
+            as: 'user1',
+            attributes: ['id', 'name', 'email', 'profileImage']
+          },
+          {
+            model: User,
+            as: 'user2',
+            attributes: ['id', 'name', 'email', 'profileImage']
+          }
+        ]
+      });
+
+      if (!chat) {
+        return [];
+      }
+
+      const participants = [];
+      if (chat.user1) participants.push(chat.user1);
+      if (chat.user2) participants.push(chat.user2);
+
+      return participants;
+    } catch (error) {
+      console.error('Error getting chat participants:', error);
+      return [];
+    }
+  }
+
   /**
    * Check if a user can join a chat
    * @param {string} userId - User ID
@@ -165,8 +209,13 @@ class RoomManager {
         return false;
       }
       
-      // Default to allow for now
-      return true;
+      // For regular chats, check if user is a participant
+      const chat = await Chat.findByPk(chatId);
+      if (!chat) {
+        return false;
+      }
+
+      return chat.user_id1 === userId || chat.user_id2 === userId;
     } catch (error) {
       console.error('Error checking chat permissions:', error);
       return false;

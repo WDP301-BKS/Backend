@@ -89,9 +89,24 @@ const schemas = {
   createChat: Joi.object({
     otherUserId: Joi.string().uuid().required()
   }),
-
   sendMessage: Joi.object({
     content: Joi.string().min(1).max(1000).required()
+  }),
+
+  generateTimeSlots: Joi.object({
+    subFieldId: Joi.string().uuid().required(),
+    startDate: Joi.date().iso().required(),
+    endDate: Joi.date().iso().min(Joi.ref('startDate')).required(),
+    weekDays: Joi.array().items(Joi.number().integer().min(0).max(6)).min(1).required(),
+    timeRanges: Joi.array().items(
+      Joi.object({
+        start: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
+        end: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
+        price: Joi.number().positive().required()
+      })
+    ).min(1).required(),
+    peakHourStart: Joi.string().pattern(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
+    peakHourMultiplier: Joi.number().min(1).max(5).required()
   })
 };
 

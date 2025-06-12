@@ -307,10 +307,67 @@ const searchFields = async (req, res) => {
     }
 };
 
+// Get fields owned by authenticated owner
+const getOwnerFields = async (req, res) => {
+    try {
+        const ownerId = req.user.id; // Get owner ID from authenticated user
+
+        const fields = await Field.findAll({
+            where: {
+                owner_id: ownerId
+            },
+            include: [
+                {
+                    model: Location,
+                    attributes: ['address_text', 'city', 'district', 'ward']
+                },
+                {
+                    model: User,
+                    as: 'owner',
+                    attributes: ['id', 'name', 'phone']
+                },
+                {
+                    model: SubField,
+                    attributes: ['id', 'name', 'field_type']
+                }
+            ],
+            attributes: [
+                'id', 
+                'name', 
+                'description', 
+                'price_per_hour', 
+                'images1', 
+                'images2', 
+                'images3', 
+                'is_verified', 
+                'created_at',
+                'updated_at'
+            ],
+            order: [['created_at', 'DESC']]
+        });
+
+        return res.json({
+            success: true,
+            data: fields
+        });
+    } catch (error) {
+        console.error('Error in getOwnerFields:', error);
+        return res.status(500).json({
+            success: false,
+            error: {
+                code: 'INTERNAL_SERVER_ERROR',
+                message: 'Đã có lỗi xảy ra khi lấy danh sách sân của owner',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            }
+        });
+    }
+};
+
 module.exports = {
     getAllFields,
     getFields,
     addField,
     getFieldDetail,
-    searchFields
-}; 
+    searchFields,
+    getOwnerFields
+};

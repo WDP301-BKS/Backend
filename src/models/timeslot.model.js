@@ -25,10 +25,13 @@ const TimeSlot = sequelize.define('timeslot', {
   },
   booking_id: {
     type: DataTypes.UUID
-  },
-  is_available: {
+  },  is_available: {
     type: DataTypes.BOOLEAN,
     defaultValue: true
+  },
+  peak_hour_multiplier: {
+    type: DataTypes.DECIMAL(3, 2),
+    defaultValue: 1.0
   }
 }, {
   timestamps: false,

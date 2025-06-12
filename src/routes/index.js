@@ -8,6 +8,7 @@ const favorite = require('./favorite.routes');
 const reviewRoutes = require('./review.routes');
 const bookingRoutes = require('./booking.routes');
 const paymentRoutes = require('./payment.routes');
+const timeSlotRoutes = require('./timeslot.routes');
 
 const router = express.Router();
 
@@ -36,3 +37,7 @@ router.use('/bookings', bookingRoutes);
 router.use('/payments', paymentRoutes);
 
 module.exports = router; 
+// Mount timeslot routes
+router.use('/slots', timeSlotRoutes);
+
+module.exports = router;
