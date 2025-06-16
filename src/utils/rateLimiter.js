@@ -19,9 +19,9 @@ class SocketRateLimiter {
       'update_online_status': { maxRequests: 10, window: 60000 }, // 10 requests per minute
       
       // Booking events
-      'subscribe_booking': { maxRequests: 15, window: 60000 }, // 15 subscriptions per minute
-      'unsubscribe_booking': { maxRequests: 15, window: 60000 }, // 15 unsubscriptions per minute
-      'sync_booking_status': { maxRequests: 5, window: 60000 }, // 5 sync requests per minute (more restrictive)
+      'subscribe_booking': { maxRequests: 50, window: 60000 }, // Increased temporarily: 50 subscriptions per minute
+      'unsubscribe_booking': { maxRequests: 50, window: 60000 }, // Increased temporarily: 50 unsubscriptions per minute
+      'sync_booking_status': { maxRequests: 20, window: 60000 }, // Increased: 20 sync requests per minute
       
       // Default fallback
       'default': { maxRequests: 50, window: 60000 } // Default limit
