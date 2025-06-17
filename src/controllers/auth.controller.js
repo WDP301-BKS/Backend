@@ -208,7 +208,7 @@ const checkGoogleAccount = asyncHandler(async (req, res) => {
     const user = await authService.findByEmail(email);
     
     if (!user) {
-      return errorResponse(res, 'User not found', HTTP_STATUS.NOT_FOUND);
+      return errorResponse(res, 'Không tìm thấy người dùng', HTTP_STATUS.NOT_FOUND);
     }
 
     return successResponse(res, 'User found', {

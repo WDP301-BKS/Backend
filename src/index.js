@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const http = require('http');
+const path = require('path');
 const { errorHandler } = require('./common');
 const { globalErrorHandler } = errorHandler;
 const logger = require('./utils/logger');
@@ -36,6 +37,9 @@ app.use(cors({
   exposedHeaders: ['x-correlation-id'],
   credentials: true
 }));
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Middleware - but exclude webhook route from JSON parsing
 app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
@@ -130,4 +134,4 @@ const startServer = async () => {
   }
 };
 
-startServer(); 
+startServer();

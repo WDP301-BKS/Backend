@@ -25,7 +25,7 @@ class AuthService {
     const user = await User.findOne({ where: { email } });
     
     if (!user && shouldThrow) {
-      throw new NotFoundError('User not found');
+      throw new NotFoundError('Không tìm thấy người dùng');
     }
     
     return user;

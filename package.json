@@ -2,7 +2,8 @@
   "name": "football-field-booking-backend",
   "version": "1.0.0",
   "description": "Backend for football field booking platform",
-  "main": "src/index.js",  "scripts": {
+  "main": "src/index.js",
+  "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "jest",
