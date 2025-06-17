@@ -98,14 +98,20 @@ const User = sequelize.define('user', {
       validate: {
           isUrl: true
       }
-  },
-  identity_card_image: {
+  },  identity_card_image: {
       type: DataTypes.TEXT,
       allowNull: true,
       validate: {
           isUrl: true
       }
-  } 
+  },
+  identity_card_back_image: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      validate: {
+          isUrl: true
+      }
+  }
 }, {
   timestamps: true,
   createdAt: 'created_at',
