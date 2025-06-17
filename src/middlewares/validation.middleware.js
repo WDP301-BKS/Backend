@@ -23,7 +23,7 @@ const schemas = {
     email: Joi.string().email().required(),
     password: Joi.string().min(6).required(),
     phone: Joi.string().pattern(/^[0-9+]{10,15}$/),
-    role: Joi.string().valid(USER_ROLES.CUSTOMER, USER_ROLES.OWNER).default(USER_ROLES.CUSTOMER)
+    role: Joi.string().valid(USER_ROLES.CUSTOMER, USER_ROLES.OWNER, USER_ROLES.ADMIN).default(USER_ROLES.CUSTOMER)
   }),
   
   login: Joi.object({
@@ -42,7 +42,7 @@ const schemas = {
       name: Joi.string().required(),
       imageUrl: Joi.string().uri().optional().allow('', null),
       googleId: Joi.string().required(),
-      role: Joi.string().valid(USER_ROLES.CUSTOMER, USER_ROLES.OWNER).default(USER_ROLES.CUSTOMER)
+      role: Joi.string().valid(USER_ROLES.CUSTOMER, USER_ROLES.OWNER, USER_ROLES.ADMIN).default(USER_ROLES.CUSTOMER)
     }).required()
   }),
   
@@ -113,4 +113,4 @@ const schemas = {
 module.exports = {
   validateRequest,
   schemas
-}; 
+};

@@ -14,4 +14,10 @@ router.get('/fields', adminController.getAllFieldsForAdmin);
 router.get('/fields/pending', adminController.getPendingFields);
 router.put('/fields/:fieldId/approve', adminController.approveField);
 
+// Quản lý user
+router.get('/users', adminController.getAllUsers);
+router.get('/users/:userId', adminController.getUserDetails);
+router.put('/users/:userId/status', adminController.updateUserStatus);
+router.get('/users/export/excel', adminController.exportUsersToExcel);
+
 module.exports = router;
