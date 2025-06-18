@@ -14,6 +14,7 @@ const getAllFields = async (req, res) => {
             include: [
                 {
                     model: Location,
+                    as: 'location',
                     attributes: ['address_text', 'city', 'district', 'ward']
                 },
                 {
@@ -23,6 +24,7 @@ const getAllFields = async (req, res) => {
                 },
                 {
                     model: SubField,
+                    as: 'subfields',
                     attributes: ['id', 'name', 'field_type']
                 }
             ],
@@ -68,6 +70,7 @@ const getFields = async (req, res) => {
             include: [
                 {
                     model: Location,
+                    as: 'location',
                     attributes: ['address_text']
                 },
                 {
@@ -428,6 +431,7 @@ const addFieldWithFiles = async (req, res) => {
             include: [
                 {
                     model: Location,
+                    as: 'location',
                     attributes: ['address_text', 'city', 'district', 'ward']
                 },
                 {
@@ -437,6 +441,7 @@ const addFieldWithFiles = async (req, res) => {
                 },
                 {
                     model: SubField,
+                    as: 'subfields',
                     attributes: ['id', 'name', 'field_type', 'image']
                 }
             ]
@@ -493,6 +498,7 @@ const updateFieldWithFiles = async (req, res) => {
             include: [
                 {
                     model: Location,
+                    as: 'location',
                     attributes: ['id']
                 }
             ]
@@ -653,6 +659,7 @@ const updateFieldWithFiles = async (req, res) => {
             include: [
                 {
                     model: Location,
+                    as: 'location',
                     attributes: ['address_text', 'city', 'district', 'ward']
                 },
                 {
@@ -662,6 +669,7 @@ const updateFieldWithFiles = async (req, res) => {
                 },
                 {
                     model: SubField,
+                    as: 'subfields',
                     attributes: ['id', 'name', 'field_type', 'image']
                 }
             ]
@@ -705,10 +713,12 @@ const getFieldDetail = async (req, res) => {
                 },
                 {
                     model: Location,
+                    as: 'location',
                     attributes: ['id', 'address_text', 'latitude', 'longitude', 'city', 'district', 'ward']
                 },
                 {
                     model: SubField,
+                    as: 'subfields',
                     attributes: ['id', 'name', 'field_type']
                 }
             ],
@@ -781,6 +791,7 @@ const searchFields = async (req, res) => {
             include: [
                 {
                     model: Location,
+                    as: 'location',
                     attributes: ['address_text', 'city', 'district', 'ward']
                 },
                 {
@@ -790,6 +801,7 @@ const searchFields = async (req, res) => {
                 },
                 {
                     model: SubField,
+                    as: 'subfields',
                     attributes: ['id', 'name', 'field_type']
                 }
             ],
@@ -838,6 +850,7 @@ const getOwnerFields = async (req, res) => {
             include: [
                 {
                     model: Location,
+                    as: 'location',
                     attributes: ['address_text', 'city', 'district', 'ward']
                 },
                 {
@@ -847,6 +860,7 @@ const getOwnerFields = async (req, res) => {
                 },
                 {
                     model: SubField,
+                    as: 'subfields',
                     attributes: ['id', 'name', 'field_type']
                 }
             ],
@@ -1144,6 +1158,7 @@ const deleteLicenseDocument = async (req, res) => {
     }
 };
 
+
 // Get field detail for editing (owner only)
 const getFieldForEdit = async (req, res) => {
     try {
@@ -1158,6 +1173,7 @@ const getFieldForEdit = async (req, res) => {
             include: [
                 {
                     model: Location,
+                    as: 'location',
                     attributes: ['address_text', 'city', 'district', 'ward']
                 },
                 {
@@ -1167,6 +1183,7 @@ const getFieldForEdit = async (req, res) => {
                 },
                 {
                     model: SubField,
+                    as: 'subfields',
                     attributes: ['id', 'name', 'field_type']
                 }
             ],

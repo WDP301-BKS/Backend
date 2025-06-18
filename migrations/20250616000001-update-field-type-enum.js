@@ -20,10 +20,10 @@ module.exports = {
     await queryInterface.sequelize.query(`
       UPDATE subfields 
       SET field_type = CASE 
-        WHEN field_type = 'indoor' THEN '5vs5'
-        WHEN field_type = 'outdoor' THEN '7vs7'
-        WHEN field_type = 'hybrid' THEN '7vs7'
-        ELSE '5vs5'
+        WHEN field_type::text = 'indoor' THEN '5vs5'::enum_subfields_field_type
+        WHEN field_type::text = 'outdoor' THEN '7vs7'::enum_subfields_field_type
+        WHEN field_type::text = 'hybrid' THEN '7vs7'::enum_subfields_field_type
+        ELSE '5vs5'::enum_subfields_field_type
       END;
     `);
   },
@@ -45,9 +45,9 @@ module.exports = {
     await queryInterface.sequelize.query(`
       UPDATE subfields 
       SET field_type = CASE 
-        WHEN field_type = '5vs5' THEN 'indoor'
-        WHEN field_type = '7vs7' THEN 'outdoor'
-        ELSE 'indoor'
+        WHEN field_type::text = '5vs5' THEN 'indoor'::enum_subfields_field_type
+        WHEN field_type::text = '7vs7' THEN 'outdoor'::enum_subfields_field_type
+        ELSE 'indoor'::enum_subfields_field_type
       END;
     `);
   }

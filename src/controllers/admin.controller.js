@@ -21,10 +21,12 @@ class AdminController {
           },
           {
             model: Location,
+            as: 'location',
             attributes: ['address_text', 'city', 'district', 'ward', 'latitude', 'longitude']
           },
           {
             model: SubField,
+            as: 'subfields',
             attributes: ['id', 'name', 'field_type', 'image']
           }
         ],
@@ -189,6 +191,7 @@ class AdminController {
           },
           {
             model: Location,
+            as: 'location',
             attributes: ['address_text', 'city', 'district', 'ward']
           }
         ],

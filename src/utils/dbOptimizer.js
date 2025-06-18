@@ -60,12 +60,15 @@ SELECT id, name, field_type
           include: [
             {
               model: SubField,
+              as: 'subfield',
               include: [
                 {
                   model: Field,
+                  as: 'field',
                   include: [
                     {
                       model: Location,
+                      as: 'location',
                       attributes: ['address_text', 'city', 'district', 'ward']
                     }
                   ],
@@ -118,13 +121,20 @@ SELECT id, name, field_type
           include: [
             {
               model: SubField,
-              include: [Field],
+              as: 'subfield',
+              include: [
+                {
+                  model: Field,
+                  as: 'field'
+                }
+              ],
               required: false
             }
           ]
         },
         {
           model: User,
+          as: 'user',
           attributes: ['id', 'name', 'email'],
           required: false
         }
@@ -326,33 +336,44 @@ SELECT id, name, field_type
     const { dateRange, fieldId, userId } = options;
     
     let whereClause = '';
+    let timeslotWhereClause = '';
     const replacements = {};
 
     if (dateRange) {
-      whereClause += ' AND booking_date BETWEEN :startDate AND :endDate';
+      whereClause += ' AND b.booking_date BETWEEN :startDate AND :endDate';
+      timeslotWhereClause += ' AND b2.booking_date BETWEEN :startDate AND :endDate';
       replacements.startDate = dateRange.start;
       replacements.endDate = dateRange.end;
     }
 
     if (fieldId) {
       whereClause += ' AND EXISTS (SELECT 1 FROM timeslots ts INNER JOIN subfields sf ON ts.sub_field_id = sf.id WHERE ts.booking_id = b.id AND sf.field_id = :fieldId)';
+      timeslotWhereClause += ' AND EXISTS (SELECT 1 FROM timeslots ts2 INNER JOIN subfields sf2 ON ts2.sub_field_id = sf2.id WHERE ts2.booking_id = b2.id AND sf2.field_id = :fieldId)';
       replacements.fieldId = fieldId;
     }
 
     if (userId) {
-      whereClause += ' AND user_id = :userId';
+      whereClause += ' AND b.user_id = :userId';
+      timeslotWhereClause += ' AND b2.user_id = :userId';
       replacements.userId = userId;
     }
 
     const query = `
       SELECT 
-        COUNT(*) as total_bookings,
-        COUNT(CASE WHEN status = 'confirmed' THEN 1 END) as confirmed_bookings,
-        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_bookings,
-        COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_bookings,
-        COUNT(CASE WHEN payment_status = 'paid' THEN 1 END) as paid_bookings,
-        SUM(CASE WHEN payment_status = 'paid' THEN total_price ELSE 0 END) as total_revenue,
-        AVG(total_price) as average_booking_value
+        COUNT(DISTINCT b.id) as total_bookings,
+        COUNT(CASE WHEN b.status = 'confirmed' THEN 1 END) as confirmed_bookings,
+        COUNT(CASE WHEN b.status = 'pending' THEN 1 END) as pending_bookings,
+        COUNT(CASE WHEN b.status = 'cancelled' THEN 1 END) as cancelled_bookings,
+        COUNT(CASE WHEN b.payment_status = 'paid' THEN 1 END) as paid_bookings,
+        SUM(CASE WHEN b.payment_status = 'paid' THEN b.total_price ELSE 0 END) as total_revenue,
+        AVG(b.total_price) as average_booking_value,
+        COALESCE(
+          (SELECT COUNT(ts.id)
+           FROM timeslots ts 
+           INNER JOIN bookings b2 ON ts.booking_id = b2.id
+           WHERE b2.status != 'cancelled' ${timeslotWhereClause}), 
+          0
+        ) as total_hours
       FROM bookings b
       WHERE 1=1 ${whereClause}
     `;
@@ -514,10 +535,11 @@ SELECT id, name, field_type
         include: [
           {
             model: TimeSlot,
-            as: 'timeslots',
+            as: 'timeSlots',
             include: [
               {
                 model: SubField,
+                as: 'subfield',
                 where: {
                   field_id: fieldId
                 }
@@ -535,12 +557,12 @@ SELECT id, name, field_type
       // Check if any of the bookings is for the same date
       for (const booking of recentBookings) {
         // Skip if no time slots
-        if (!booking.timeslots || booking.timeslots.length === 0) {
+        if (!booking.timeSlots || booking.timeSlots.length === 0) {
           continue;
         }
 
         // Check if any time slot matches the booking date
-        for (const timeSlot of booking.timeslots) {
+        for (const timeSlot of booking.timeSlots) {
           // Compare dates (ignore time part)
           const slotDate = new Date(timeSlot.date);
           if (
@@ -826,13 +848,13 @@ SELECT id, name, field_type
     const transaction = await sequelize.transaction();
     
     try {
-      // Find bookings that are pending payment for more than 15 minutes
+      // Find bookings that are pending payment for more than 10 minutes
       const expiredBookings = await Booking.findAll({
         where: {
           status: 'payment_pending',
           payment_status: 'pending',
           created_at: {
-            [Op.lt]: new Date(Date.now() - 15 * 60 * 1000) // 15 minutes ago
+            [Op.lt]: new Date(Date.now() - 10 * 60 * 1000) // 10 minutes ago
           }
         },
         transaction
@@ -849,7 +871,7 @@ SELECT id, name, field_type
       const deletedTimeslots = await TimeSlot.destroy({
         where: {
           booking_id: {
-            [sequelize.Op.in]: expiredBookingIds
+            [Op.in]: expiredBookingIds
           }
         },
         transaction
@@ -864,7 +886,7 @@ SELECT id, name, field_type
         {
           where: {
             id: {
-              [sequelize.Op.in]: expiredBookingIds
+              [Op.in]: expiredBookingIds
             }
           },
           transaction
@@ -890,7 +912,10 @@ SELECT id, name, field_type
       };
       
     } catch (error) {
-      await transaction.rollback();
+      // Only rollback if transaction is still active
+      if (transaction && !transaction.finished) {
+        await transaction.rollback();
+      }
       console.error('Error cleaning up expired bookings:', error);
       throw error;
     }
@@ -916,6 +941,263 @@ SELECT id, name, field_type
     });
     
     return cleanupInterval;
+  }
+
+  /**
+   * Get user bookings with optimized query and eager loading
+   */
+  async getUserBookingsOptimized(userId, options = {}) {
+    const { Booking, TimeSlot, Field, SubField, User, Location } = require('../models');
+    
+    const cacheKey = `user_bookings:${userId}:${JSON.stringify(options)}`;
+    
+    // Check cache first
+    if (!options.skipCache) {
+      const cached = await cache.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
+    const { limit = 50, offset = 0, status, dateRange } = options;
+    
+    let whereClause = { user_id: userId };
+    
+    if (status) {
+      whereClause.status = status;
+    }
+    
+    if (dateRange) {
+      whereClause.booking_date = {
+        [Op.between]: [dateRange.start, dateRange.end]
+      };
+    }
+
+    console.log('getUserBookingsOptimized - Fetching bookings with userId:', userId);
+
+    const bookings = await Booking.findAll({
+      where: whereClause,
+      include: [
+        {
+          model: TimeSlot,
+          as: 'timeSlots', // Use correct alias
+          include: [
+            {
+              model: SubField,
+              as: 'subfield', // Use explicit alias
+              include: [
+                {
+                  model: Field,
+                  as: 'field', // Use explicit alias
+                  include: [
+                    {
+                      model: Location,
+                      as: 'location', // Use explicit alias
+                      attributes: ['address_text', 'city', 'district', 'ward']
+                    }
+                  ],
+                  attributes: ['id', 'name', 'description', 'price_per_hour', 'images1']
+                }
+              ],
+              attributes: ['id', 'name', 'field_type']
+            }
+          ],
+          attributes: ['id', 'date', 'start_time', 'end_time', 'is_available', 'sub_field_id']
+        },
+        {
+          model: User,
+          attributes: ['id', 'name', 'email']
+        }
+      ],
+      order: [['created_at', 'DESC']],
+      limit,
+      offset
+    });
+
+    console.log(`getUserBookingsOptimized - Found ${bookings.length} bookings for user ${userId}`);
+
+    // Transform data for frontend - use Promise.all to handle async operations
+    const transformedBookings = await Promise.all(bookings.map(async (booking, index) => {
+      console.log(`Processing booking ${index + 1}:`, {
+        id: booking.id,
+        timeSlots: booking.timeSlots?.length || 0,
+        bookingMetadata: booking.booking_metadata
+      });
+
+      // Use correct accessor for TimeSlots
+      const timeSlots = booking.timeSlots || [];
+      const firstTimeSlot = timeSlots[0];
+      
+      // Try to get field info from booking metadata first, then from relationships
+      let field = null;
+      let subField = null;
+      let location = null;
+
+      if (firstTimeSlot) {
+        subField = firstTimeSlot.subfield;
+        if (subField) {
+          field = subField.field;
+          if (field) {
+            location = field.location;
+          }
+        }
+      }
+
+      // Fallback to booking metadata if relationships are not loaded
+      let fallbackFieldInfo = null;
+      if (!field && booking.booking_metadata?.fieldId) {
+        console.log('Using fallback to booking metadata for field info');
+        // Try to fetch field info from metadata
+        fallbackFieldInfo = await this.getFieldInfoFromMetadata(booking.booking_metadata);
+      }
+
+      const result = {
+        id: booking.id,
+        booking_date: booking.booking_date,
+        fieldName: field?.name || fallbackFieldInfo?.fieldName || 'Sân không xác định',
+        fieldType: subField?.field_type || fallbackFieldInfo?.fieldType || 'Không xác định',
+        fieldNumber: subField?.name || fallbackFieldInfo?.fieldNumber || 'N/A',
+        fieldLocation: location ? `${location.district}, ${location.city}` : fallbackFieldInfo?.fieldLocation || 'Không xác định',
+        date: firstTimeSlot?.date || booking.booking_date,
+        timeSlots: timeSlots.length > 0 ? timeSlots.map(ts => `${ts.start_time} - ${ts.end_time}`) : (fallbackFieldInfo?.timeSlots || []),
+        totalPrice: parseFloat(booking.total_price),
+        status: booking.status,
+        paymentStatus: booking.payment_status,
+        bookingDate: booking.created_at,
+        customerInfo: booking.customer_info || {},
+        images: field?.images1 ? field.images1.split(',') : fallbackFieldInfo?.images || [],
+        // Include raw timeslots data for frontend processing
+        timeslots: timeSlots.length > 0 ? timeSlots.map(ts => ({
+          id: ts.id,
+          date: ts.date,
+          start_time: ts.start_time,
+          end_time: ts.end_time,
+          sub_field_id: ts.sub_field_id,
+          subfield: ts.subfield
+        })) : (fallbackFieldInfo?.timeslots || [])
+      };
+
+      console.log('Transformed booking result:', {
+        id: result.id,
+        fieldName: result.fieldName,
+        timeSlots: result.timeSlots
+      });
+
+      return result;
+    }));
+
+    // Cache for 2 minutes
+    if (!options.skipCache) {
+      await cache.set(cacheKey, transformedBookings, 2 * 60);
+    }
+
+    console.log(`getUserBookingsOptimized - Returning ${transformedBookings.length} transformed bookings`);
+    return transformedBookings;
+  }
+
+  /**
+   * Get field information from booking metadata when relationships are missing
+   */
+  async getFieldInfoFromMetadata(metadata) {
+    if (!metadata || !metadata.fieldId) {
+      return null;
+    }
+
+    try {
+      // First, try to use cached field info from metadata if available
+      if (metadata.fieldName && metadata.fieldLocation) {
+        console.log('Using cached field info from booking metadata');
+        
+        // Format time slots from metadata
+        let timeSlots = [];
+        let timeslots = [];
+        if (metadata.timeSlots && Array.isArray(metadata.timeSlots)) {
+          timeSlots = metadata.timeSlots.map(ts => `${ts.start_time} - ${ts.end_time}`);
+          timeslots = metadata.timeSlots.map((ts, index) => ({
+            id: ts.id || null,
+            date: metadata.playDate,
+            start_time: ts.start_time,
+            end_time: ts.end_time,
+            sub_field_id: ts.sub_field_id || metadata.subFieldIds?.[0],
+            subfield: metadata.subFields?.[0] || null
+          }));
+        }
+
+        return {
+          fieldName: metadata.fieldName,
+          fieldType: metadata.subFields?.[0]?.field_type || 'Sân bóng đá',
+          fieldNumber: metadata.subFields?.[0]?.name || 'N/A',
+          fieldLocation: metadata.fieldLocation ? 
+            `${metadata.fieldLocation.district}, ${metadata.fieldLocation.city}` : 
+            'Không xác định',
+          images: metadata.fieldImages ? metadata.fieldImages.split(',') : [],
+          timeSlots,
+          timeslots
+        };
+      }
+
+      // Fallback: fetch from database if metadata is incomplete
+      console.log('Fetching field info from database using metadata fallback');
+      const { Field, SubField, Location } = require('../models');
+      
+      // Fetch field info directly from database using metadata
+      const field = await Field.findByPk(metadata.fieldId, {
+        include: [
+          {
+            model: Location,
+            as: 'location',
+            attributes: ['address_text', 'city', 'district', 'ward']
+          }
+        ],
+        attributes: ['id', 'name', 'description', 'price_per_hour', 'images1']
+      });
+
+      if (!field) {
+        console.log('Field not found in database using metadata fieldId:', metadata.fieldId);
+        return null;
+      }
+
+      // Try to get subfield info if available
+      let subFieldInfo = null;
+      if (metadata.subFieldIds && metadata.subFieldIds.length > 0) {
+        const subField = await SubField.findByPk(metadata.subFieldIds[0], {
+          attributes: ['id', 'name', 'field_type']
+        });
+        subFieldInfo = subField;
+      }
+
+      // Format time slots from metadata - this is the key fix!
+      let timeSlots = [];
+      let timeslots = [];
+      if (metadata.timeSlots && Array.isArray(metadata.timeSlots)) {
+        console.log('Processing timeSlots from metadata:', metadata.timeSlots);
+        timeSlots = metadata.timeSlots.map(ts => `${ts.start_time} - ${ts.end_time}`);
+        timeslots = metadata.timeSlots.map((ts, index) => ({
+          id: ts.id || `fallback-${index}`,
+          date: metadata.playDate,
+          start_time: ts.start_time,
+          end_time: ts.end_time,
+          sub_field_id: ts.sub_field_id || metadata.subFieldIds?.[0],
+          subfield: subFieldInfo
+        }));
+        console.log('Formatted timeSlots:', timeSlots);
+        console.log('Formatted timeslots:', timeslots);
+      }
+
+      return {
+        fieldName: field.name,
+        fieldType: subFieldInfo?.field_type || 'Sân bóng đá',
+        fieldNumber: subFieldInfo?.name || 'N/A',
+        fieldLocation: field.location ? `${field.location.district}, ${field.location.city}` : 'Không xác định',
+        images: field.images1 ? field.images1.split(',') : [],
+        timeSlots,
+        timeslots
+      };
+
+    } catch (error) {
+      console.error('Error getting field info from metadata:', error);
+      return null;
+    }
   }
 }
 

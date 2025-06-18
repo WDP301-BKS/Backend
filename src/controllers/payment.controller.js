@@ -1,6 +1,7 @@
 const PaymentService = require('../services/payment.service');
 const responseFormatter = require('../utils/responseFormatter');
 const logger = require('../utils/logger');
+const { logEmailOperation } = require('../utils/logger');
 const { Booking, TimeSlot, Field, User, SubField, Payment, Location } = require('../models');
 const { ValidationError, Op } = require('sequelize');
 const { sequelize } = require('../config/db.config');
@@ -12,6 +13,7 @@ const sanitizeHtml = require('sanitize-html');
 const validator = require('validator');
 const rateLimit = require('express-rate-limit');
 const { emitBookingStatusUpdate, emitBookingPaymentUpdate, emitBookingEvent } = require('../config/socket.config');
+const { sendBookingConfirmationEmail, sendOwnerBookingNotificationEmail } = require('../utils/emailService');
 
 // Redis setup with fallback
 let redis = null;
@@ -310,9 +312,18 @@ class PaymentController {
       try {
         console.log('Validation passed, checking field:', fieldId);
         
-        // Check if field exists with retry mechanism
+        // Check if field exists with retry mechanism and fetch full info for metadata
         const field = await retryMechanism.executeDatabaseOperation(
-          () => Field.findByPk(fieldId),
+          () => Field.findByPk(fieldId, {
+            include: [
+              {
+                model: Location,
+                as: 'location',
+                attributes: ['address_text', 'city', 'district', 'ward']
+              }
+            ],
+            attributes: ['id', 'name', 'description', 'price_per_hour', 'images1']
+          }),
           'field_lookup'
         );
         
@@ -324,6 +335,23 @@ class PaymentController {
             code: 404, 
             message: 'Field not found' 
           }));
+        }
+
+        // Fetch subfield info for metadata
+        let subFieldsInfo = [];
+        if (subFieldIds && subFieldIds.length > 0) {
+          try {
+            const subFields = await retryMechanism.executeDatabaseOperation(
+              () => SubField.findAll({
+                where: { id: subFieldIds },
+                attributes: ['id', 'name', 'field_type']
+              }),
+              'subfield_lookup'
+            );
+            subFieldsInfo = subFields;
+          } catch (subFieldError) {
+            console.log('Could not fetch subfield info:', subFieldError.message);
+          }
         }
 
         // Use optimized availability check instead of manual loop
@@ -402,7 +430,21 @@ class PaymentController {
                 customer_info: sanitizedCustomerInfo,
                 booking_metadata: {
                   fieldId,
+                  fieldName: field.name,
+                  fieldDescription: field.description,
+                  fieldImages: field.images1,
+                  fieldLocation: field.location ? {
+                    address: field.location.address_text,
+                    city: field.location.city,
+                    district: field.location.district,
+                    ward: field.location.ward
+                  } : null,
                   subFieldIds,
+                  subFields: subFieldsInfo.map(sf => ({
+                    id: sf.id,
+                    name: sf.name,
+                    field_type: sf.field_type
+                  })),
                   playDate: bookingDate,
                   timeSlots
                 }
@@ -675,6 +717,11 @@ class PaymentController {
           await this.handleCheckoutSessionCompleted(event.data.object);
           break;
           
+        case 'checkout.session.async_payment_succeeded':
+          logger.info('Processing checkout.session.async_payment_succeeded webhook');
+          await this.handleCheckoutSessionCompleted(event.data.object);
+          break;
+          
         case 'checkout.session.expired':
           logger.info('Processing checkout.session.expired webhook');
           await this.handleCheckoutSessionExpired(event.data.object);
@@ -688,6 +735,11 @@ class PaymentController {
         case 'payment_intent.payment_failed':
           logger.info('Processing payment_intent.payment_failed webhook');
           await this.handlePaymentFailed(event.data.object);
+          break;
+          
+        case 'checkout.session.pending':
+          logger.info('Processing checkout.session.pending webhook');
+          await this.handleCheckoutSessionPending(event.data.object);
           break;
           
         default:
@@ -716,10 +768,19 @@ class PaymentController {
         client_reference_id: session.client_reference_id,
         metadata: session.metadata
       });
-
+      
+      // CRITICAL FIX: Only process if payment is actually completed
+      if (session.payment_status !== 'paid') {
+        logger.info(`Session ${session.id} completed but payment not yet paid (status: ${session.payment_status}). Handling as pending.`);
+        await this.handleCheckoutSessionPending(session);
+        return;
+      }
+      
       // Xác định loại giao dịch từ metadata hoặc client_reference_id
       // Giả định: metadata.type = 'booking' | 'package', metadata.userId, metadata.packageType
       const type = session.metadata?.type || 'booking';
+      
+      // Use transaction to ensure data consistency
       const transaction = await sequelize.transaction();
 
       try {
@@ -747,7 +808,7 @@ class PaymentController {
           await transaction.commit();
           // TODO: Gửi thông báo, email, v.v. cho user về việc mua package thành công
         } else {
-          // ...existing code for booking payment...
+          // Handle booking payment
           // Find the booking using client_reference_id
           const booking = await Booking.findByPk(session.client_reference_id, { transaction });
           if (!booking) {
@@ -755,34 +816,63 @@ class PaymentController {
             await transaction.rollback();
             return;
           }
+          
           logger.info('Found booking:', {
             id: booking.id,
             status: booking.status,
             payment_status: booking.payment_status
           });
+          
           // Check if booking is already confirmed (to avoid duplicate processing)
           const wasAlreadyConfirmed = booking.status === 'confirmed' && booking.payment_status === 'paid';
+          
           // Update booking status (idempotent operation)
           await booking.update({
             status: 'confirmed',
             payment_status: 'paid'
           }, { transaction });
+          
           logger.info('Booking updated successfully to confirmed status');
-          // Update payment record
+          
+          // Update payment record với thông tin đầy đủ từ session
+          const updateData = {
+            status: 'succeeded',
+            stripe_payment_intent_id: session.payment_intent,
+            stripe_session_id: session.id,
+            stripe_status: 'paid',
+            processed_at: new Date(),
+            updated_at: new Date()
+          };
+
+          // Lấy thêm thông tin từ session metadata nếu có
+          if (session.metadata) {
+            if (session.metadata.customer_email && !updateData.customer_email) {
+              updateData.customer_email = session.metadata.customer_email;
+            }
+            if (session.metadata.customer_name && !updateData.customer_name) {
+              updateData.customer_name = session.metadata.customer_name;
+            }
+          }
+
+          // Nếu session có customer_details, ưu tiên sử dụng
+          if (session.customer_details?.email) {
+            updateData.customer_email = session.customer_details.email;
+          }
+          if (session.customer_details?.name) {
+            updateData.customer_name = session.customer_details.name;
+          }
+
           const updateResult = await Payment.update(
-            {
-              status: 'succeeded',
-              stripe_payment_intent_id: session.payment_intent,
-              stripe_session_id: session.id,
-              processed_at: new Date(),
-              updated_at: new Date()
-            },
+            updateData,
             {
               where: { booking_id: booking.id },
               transaction
             }
           );
+          
           logger.info(`Payment record updated: ${updateResult[0]} row(s) affected`);
+          logger.info('✅ Payment confirmed - booking status updated to confirmed');
+          
           // Time slots should already exist from atomic booking creation
           // Just update them to confirmed status if payment successful
           if (!wasAlreadyConfirmed) {
@@ -792,6 +882,7 @@ class PaymentController {
               },
               transaction
             });
+
             if (existingTimeSlots.length > 0) {
               // Time slots already exist, just ensure they're properly marked as unavailable
               await TimeSlot.update(
@@ -808,8 +899,10 @@ class PaymentController {
           } else {
             logger.info('Booking was already confirmed, time slots already exist');
           }
+          
           await transaction.commit();
           logger.info('Booking confirmed successfully:', booking.id);
+          
           // Emit real-time updates via WebSocket
           try {
             emitBookingStatusUpdate(booking.id, {
@@ -818,26 +911,153 @@ class PaymentController {
               userId: booking.user_id,
               message: 'Payment successful - Booking confirmed!'
             });
+            
+            // Emit booking payment update với thông tin chi tiết hơn
             emitBookingPaymentUpdate(booking.id, {
               payment_status: 'paid',
               status: 'succeeded',
               userId: booking.user_id,
+              bookingId: booking.id,
               stripe_session_id: session.id,
               stripe_payment_intent_id: session.payment_intent,
+              amount: booking.total_price,
+              currency: 'vnd',
+              timestamp: new Date().toISOString(),
               message: 'Payment processed successfully'
             });
+            
+            // Emit general booking event for broader notifications với flag refresh
             emitBookingEvent('payment_confirmed', booking.id, {
               userId: booking.user_id,
+              bookingId: booking.id,
               status: 'confirmed',
               payment_status: 'paid',
+              amount: booking.total_price,
+              timestamp: new Date().toISOString(),
+              refresh_needed: true, // Flag để frontend biết cần refresh booking history
               message: 'Your booking has been confirmed and payment processed successfully!'
             });
+            
             logger.info('Real-time notifications sent for booking confirmation:', booking.id);
+            
           } catch (socketError) {
+            // Log socket errors but don't fail the webhook
             logger.error('Error sending real-time notifications (webhook still succeeded):', socketError);
           }
-          // TODO: Send confirmation email
+          
+          // Send confirmation emails
+          try {
+            // Get booking details with related data for email
+          const bookingWithDetails = await Booking.findByPk(booking.id, {
+            include: [
+              {
+                model: User,
+                as: 'user',
+                attributes: ['id', 'name', 'email']
+              },
+              {
+                model: TimeSlot,
+                as: 'timeSlots',
+                attributes: ['id', 'start_time', 'end_time', 'date', 'sub_field_id'],
+                include: [
+                  {
+                    model: SubField,
+                    as: 'subfield',
+                    attributes: ['id', 'name', 'field_id'],
+                    include: [
+                      {
+                        model: Field,
+                        as: 'field',
+                        attributes: ['id', 'name', 'owner_id'],
+                        include: [
+                          {
+                            model: User,
+                            as: 'owner',
+                            attributes: ['id', 'name', 'email']
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          });
+
+          if (bookingWithDetails && bookingWithDetails.user && bookingWithDetails.timeSlots && bookingWithDetails.timeSlots.length > 0) {
+            const firstTimeSlot = bookingWithDetails.timeSlots[0];
+            const field = firstTimeSlot.subfield?.field;
+            
+            if (field) {
+              // Prepare booking details for email
+              const timeSlots = bookingWithDetails.timeSlots || [];
+              const firstSlot = timeSlots[0];
+              const lastSlot = timeSlots[timeSlots.length - 1];
+              
+              // Create time ranges from start_time and end_time
+              const formatTime = (timeStr) => {
+                if (!timeStr) return '';
+                // timeStr is in format "HH:MM:SS", we want "HH:MM"
+                return timeStr.substring(0, 5);
+              };
+              
+              const startTime = firstSlot ? formatTime(firstSlot.start_time) : '';
+              const endTime = lastSlot ? formatTime(lastSlot.end_time) : '';
+              
+              const bookingDetails = {
+                fieldName: field.name,
+                customerName: bookingWithDetails.customer_info?.name || bookingWithDetails.user.name,
+                customerEmail: bookingWithDetails.customer_info?.email || bookingWithDetails.user.email,
+                customerPhone: bookingWithDetails.customer_info?.phone || 'Không có thông tin',
+                date: new Date(bookingWithDetails.booking_date).toLocaleDateString('vi-VN', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                }),
+                timeRange: `${startTime} - ${endTime}`,
+                totalAmount: bookingWithDetails.total_price,
+                bookingId: bookingWithDetails.id
+              };
+
+              // Send confirmation email to customer
+              if (bookingDetails.customerEmail) {
+                try {
+                  await sendBookingConfirmationEmail(
+                    bookingDetails.customerEmail,
+                    bookingDetails.customerName,
+                    bookingDetails
+                  );
+                  logEmailOperation('send', bookingDetails.customerEmail, 'booking_confirmation', true);
+                  logger.info('Confirmation email sent to customer:', bookingDetails.customerEmail);
+                } catch (emailError) {
+                  logEmailOperation('send', bookingDetails.customerEmail, 'booking_confirmation', false, emailError);
+                  logger.error('Failed to send confirmation email to customer:', emailError);
+                }
+              }
+
+              // Send notification email to field owner
+              if (field.owner && field.owner.email) {
+                try {
+                  await sendOwnerBookingNotificationEmail(
+                    field.owner.email,
+                    field.owner.name,
+                    bookingDetails
+                  );
+                  logEmailOperation('send', field.owner.email, 'owner_notification', true);
+                  logger.info('Notification email sent to field owner:', field.owner.email);
+                } catch (emailError) {
+                  logEmailOperation('send', field.owner.email, 'owner_notification', false, emailError);
+                  logger.error('Failed to send notification email to field owner:', emailError);
+                }
+              }
+            }
+          }
+        } catch (emailError) {
+          // Log email errors but don't fail the webhook
+          logger.error('Error sending confirmation emails (webhook still succeeded):', emailError);
         }
+        }
+        
       } catch (transactionError) {
         await transaction.rollback();
         throw transactionError;
@@ -949,9 +1169,11 @@ class PaymentController {
    */
   async handlePaymentSucceeded(paymentIntent) {
     try {
-      logger.info('Processing successful payment:', paymentIntent.id);
+      logger.info('Processing successful payment intent:', paymentIntent.id);
       
-      // Additional processing if needed
+      // Use PaymentService to handle the payment
+      await PaymentService.handlePaymentSucceeded(paymentIntent);
+      logger.info('Payment intent processed successfully via PaymentService');
       
     } catch (error) {
       logger.error('Error handling payment succeeded:', error);
@@ -963,9 +1185,11 @@ class PaymentController {
    */
   async handlePaymentFailed(paymentIntent) {
     try {
-      logger.info('Processing failed payment:', paymentIntent.id);
+      logger.info('Processing failed payment intent:', paymentIntent.id);
       
-      // Additional processing if needed
+      // Use PaymentService to handle the payment failure
+      await PaymentService.handlePaymentFailed(paymentIntent);
+      logger.info('Payment failure processed successfully via PaymentService');
       
     } catch (error) {
       logger.error('Error handling payment failed:', error);
@@ -973,207 +1197,41 @@ class PaymentController {
   }
 
   /**
-   * Continue payment for an existing booking
+   * Handle checkout session created/completed but payment pending
    */
-  async continuePaymentForBooking(req, res) {
+  async handleCheckoutSessionPending(session) {
     try {
-      const { bookingId } = req.params;
-      const { return_url = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/booking/confirmation`, cancel_url } = req.body;
+      logger.info('Processing checkout session with pending payment:', session.id);
       
-      logger.info('Continuing payment for booking:', bookingId);
-      
-      // Check if booking exists
-      const booking = await Booking.findByPk(bookingId, {
-        include: [
-          { model: Field, as: 'field' },
-          { model: Payment, as: 'payment' }
-        ]
-      });
-      
-      if (!booking) {
-        logger.error('Booking not found:', bookingId);
-        return res.status(404).json(responseFormatter.error({
-          code: 404,
-          message: 'Booking not found'
-        }));
-      }
-      
-      // Check if booking status allows payment
-      if (booking.status === 'cancelled') {
-        return res.status(400).json(responseFormatter.error({
-          code: 400,
-          message: 'Booking has been cancelled'
-        }));
-      }
-      
-      if (booking.payment_status === 'paid') {
-        return res.status(400).json(responseFormatter.error({
-          code: 400,
-          message: 'Booking has already been paid'
-        }));
-      }
-      
-      const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-      
-      // Create a new Checkout Session
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ['card'],
-        line_items: [
-          {
-            price_data: {
-              currency: booking.currency || 'vnd',
-              product_data: {
-                name: `Đặt sân ${booking.field.name}`,
-                description: `Ngày ${booking.bookingDate}`,
-                metadata: {
-                  booking_id: booking.id
-                }
-              },
-              unit_amount: parseInt(booking.totalAmount)
-            },
-            quantity: 1,
-          },
-        ],
-        mode: 'payment',
-        success_url: `${new URL(return_url).origin}/booking/confirmation?booking_id=${booking.id}&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: cancel_url || `${process.env.FRONTEND_URL || 'http://localhost:5173'}/payment/cancel`,
-        client_reference_id: booking.id
-      });
-      
-      // Update payment record with new session
-      if (booking.payment) {
-        await booking.payment.update({
+      // Update payment record to show session is active but payment pending
+      const updateResult = await Payment.update(
+        {
           stripe_session_id: session.id,
+          stripe_payment_intent_id: session.payment_intent,
           updated_at: new Date()
-        });
-      } else {
-        // Create new payment record if one doesn't exist
-        await Payment.create({
-          booking_id: booking.id,
-          payment_status: 'pending',
-          amount: booking.totalAmount,
-          currency: booking.currency || 'vnd',
-          stripe_session_id: session.id,
-          created_at: new Date(),
-          updated_at: new Date()
-        });
-      }
-      
-      return res.status(200).json(responseFormatter.success({
-        message: 'Payment session created successfully',
-        data: {
-          booking_id: booking.id,
-          checkout_url: session.url,
-          session_id: session.id,
-          payment_id: booking.payment?.id || null,
-          amount: booking.totalAmount,
-          currency: booking.currency || 'vnd'
-        }
-      }));
-      
-    } catch (error) {
-      logger.error('Error continuing payment:', error);
-      return res.status(500).json(responseFormatter.error({
-        code: 500,
-        message: 'Failed to create payment session'
-      }));
-    }
-  }
-
-  /**
-   * Get booking details by session ID
-   */
-  async getBookingBySessionId(req, res) {
-    try {
-      const { sessionId } = req.params;
-      
-      if (!sessionId) {
-        return res.status(400).json(responseFormatter.error({
-          code: 400,
-          message: 'Session ID is required'
-        }));
-      }
-      
-      // Find payment by session ID
-      const payment = await Payment.findOne({
-        where: { stripe_session_id: sessionId },
-        include: [{
-          model: Booking,
-          as: 'booking',
-          include: [
-            {
-              model: TimeSlot,
-              as: 'timeslots'
-            }
-          ]
-        }]
-      });
-      
-      if (!payment || !payment.booking) {
-        return res.status(404).json(responseFormatter.error({
-          code: 404,
-          message: 'Booking not found'
-        }));
-      }
-      
-      const booking = payment.booking;
-      const field = await Field.findByPk(booking.booking_metadata.fieldId);
-      
-      const bookingDetails = {
-        id: booking.id,
-        bookingDate: booking.booking_metadata.playDate,
-        field: {
-          id: field?.id,
-          name: field?.name,
-          location: field?.location
         },
-        timeSlots: booking.timeslots.map(slot => ({
-          startTime: slot.start_time,
-          endTime: slot.end_time
-        })),
-        totalAmount: payment.amount,
-        currency: payment.currency,
-        status: booking.status,
-        paymentStatus: payment.payment_status,
-        customerInfo: booking.customer_info,
-        createdAt: booking.created_at
-      };
+        {
+          where: { 
+            booking_id: session.client_reference_id 
+          }
+        }
+      );
       
-      return res.status(200).json(responseFormatter.success(
-        bookingDetails,
-        'Booking details retrieved successfully'
-      ));
+      logger.info(`Payment record updated with session info: ${updateResult[0]} row(s) affected`);
+      
+      // Emit real-time update that session is ready for payment
+      const booking = await Booking.findByPk(session.client_reference_id);
+      if (booking) {
+        emitBookingStatusUpdate(booking.id, {
+          status: 'payment_pending',
+          payment_status: 'pending',
+          userId: booking.user_id,
+          message: 'Checkout session ready - awaiting payment completion'
+        });
+      }
       
     } catch (error) {
-      logger.error('Error getting booking by session ID:', error);
-      return res.status(500).json(responseFormatter.error({
-        code: 500,
-        message: error.message
-      }));
-    }
-  }
-
-  /**
-   * Create refund
-   */
-  async createRefund(req, res) {
-    try {
-      const { payment_id } = req.params;
-      const { amount, reason } = req.body;
-
-      const refund = await PaymentService.createRefund(payment_id, {
-        amount: amount ? parseInt(amount) : undefined,
-        reason
-      });
-
-      return res.status(200).json(responseFormatter.success(refund, 'Refund created successfully'));
-
-    } catch (error) {
-      logger.error('Error creating refund:', error);
-      return res.status(500).json(responseFormatter.error({ 
-        code: 500, 
-        message: error.message 
-      }));
+      logger.error('Error handling checkout session pending:', error);
     }
   }
 
@@ -1252,6 +1310,151 @@ class PaymentController {
   }
 
   /**
+   * Get booking details by session ID
+   */
+  async getBookingBySessionId(req, res) {
+    try {
+      const { sessionId } = req.params;
+      
+      if (!sessionId) {
+        return res.status(400).json(responseFormatter.error({
+          code: 400,
+          message: 'Session ID is required'
+        }));
+      }
+      
+      // Find payment by session ID
+      const payment = await Payment.findOne({
+        where: { stripe_session_id: sessionId },
+        include: [{
+          model: Booking,
+          as: 'booking',
+          include: [
+            {
+              model: TimeSlot,
+              as: 'timeSlots'
+            }
+          ]
+        }]
+      });
+      
+      if (!payment || !payment.booking) {
+        return res.status(404).json(responseFormatter.error({
+          code: 404,
+          message: 'Booking not found'
+        }));
+      }
+      
+      const booking = payment.booking;
+      const field = await Field.findByPk(booking.booking_metadata.fieldId);
+      
+      const bookingDetails = {
+        id: booking.id,
+        bookingDate: booking.booking_date,
+        field: {
+          id: field?.id || booking.booking_metadata.fieldId,
+          name: field?.name || 'Unknown Field',
+          description: field?.description || '',
+          price_per_hour: field?.price_per_hour || 0,
+          images1: field?.images1 || '',
+          location: {
+            address_text: field?.address_text || '',
+            city: field?.city || '',
+            district: field?.district || '',
+            ward: field?.ward || ''
+          },
+          owner: {
+            id: field?.owner_id || '',
+            name: field?.owner_name || ''
+          },
+          subfields: []
+        },
+        timeSlots: booking.timeSlots?.map(slot => ({
+          startTime: slot.start_time,
+          endTime: slot.end_time,
+          sub_field_id: slot.sub_field_id
+        })) || [],
+        totalAmount: booking.total_price,
+        currency: payment.currency || 'vnd',
+        status: booking.status,
+        paymentStatus: booking.payment_status,
+        customerInfo: booking.customer_info,
+        createdAt: booking.created_at
+      };
+      
+      return res.status(200).json(responseFormatter.success({
+        message: 'Booking details retrieved successfully',
+        data: bookingDetails
+      }));
+      
+    } catch (error) {
+      logger.error('Error getting booking by session ID:', error);
+      return res.status(500).json(responseFormatter.error({
+        code: 500,
+        message: 'Failed to get booking details'
+      }));
+    }
+  }
+
+  /**
+   * Create refund
+   */
+  async createRefund(req, res) {
+    try {
+      const { payment_id } = req.params;
+      const { amount, reason } = req.body;
+      
+      if (!payment_id) {
+        return res.status(400).json(responseFormatter.error({
+          code: 400,
+          message: 'Payment ID is required'
+        }));
+      }
+      
+      if (!amount || amount <= 0) {
+        return res.status(400).json(responseFormatter.error({
+          code: 400,
+          message: 'Valid refund amount is required'
+        }));
+      }
+      
+      // Find payment record
+      const payment = await Payment.findByPk(payment_id, {
+        include: [{ model: Booking, as: 'booking' }]
+      });
+      
+      if (!payment) {
+        return res.status(404).json(responseFormatter.error({
+          code: 404,
+          message: 'Payment not found'
+        }));
+      }
+      
+      if (payment.status !== 'succeeded') {
+        return res.status(400).json(responseFormatter.error({
+          code: 400,
+          message: 'Can only refund successful payments'
+        }));
+      }
+      
+      // Use PaymentService to create refund
+      const refundResult = await PaymentService.createRefund(payment_id, amount, reason);
+      
+      return res.status(200).json(responseFormatter.success({
+        message: 'Refund created successfully',
+        data: refundResult
+      }));
+      
+    } catch (error) {
+      logger.error('Error creating refund:', error);
+      return res.status(500).json(responseFormatter.error({
+        code: 500,
+        message: error.message || 'Failed to create refund'
+      }));
+    }
+  }
+
+  /**
    * Clean up expired pending bookings (temporary bookings older than 1 hour without payment)
    */
   async cleanupExpiredBookings() {
@@ -1261,13 +1464,13 @@ class PaymentController {
       const transaction = await sequelize.transaction();
       
       try {
-        // Find pending bookings older than 1 hour (unpaid temporary bookings)
+        // Find pending bookings older than 10 minutes
         const expiredBookings = await Booking.findAll({
           where: {
             status: 'pending',
             payment_status: 'pending',
             booking_date: {
-              [Op.lt]: new Date(Date.now() - 60 * 60 * 1000) // 1 hour ago
+              [Op.lt]: new Date(Date.now() - 10 * 60 * 1000) // 10 minutes ago
             }
           },
           transaction
@@ -1355,7 +1558,7 @@ class PaymentController {
           include: [
             {
               model: TimeSlot,
-              as: 'timeslots'
+              as: 'timeSlots'
             },
             {
               model: Payment,
@@ -1491,7 +1694,7 @@ class PaymentController {
               include: [
                 {
                   model: TimeSlot,
-                  as: 'timeslots'
+                  as: 'timeSlots'
                 },
                 {
                   model: Payment,
@@ -1548,7 +1751,7 @@ class PaymentController {
             include: [
               {
                 model: TimeSlot,
-                as: 'timeslots'
+                as: 'timeSlots'
               },
               {
                 model: Payment,
@@ -1595,7 +1798,7 @@ class PaymentController {
         include: [
           {
             model: TimeSlot,
-            as: 'timeslots'
+            as: 'timeSlots'
           },
           {
             model: Payment,
@@ -1645,6 +1848,180 @@ class PaymentController {
   }
 
   /**
+   * Continue payment for an existing booking
+   */
+  async continuePaymentForBooking(req, res) {
+    try {
+      const { bookingId } = req.params;
+      const { return_url = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/booking/confirmation`, cancel_url } = req.body;
+      
+      logger.info(`Continuing payment for booking: ${bookingId}`);
+      
+      // Check if booking exists with proper nested includes
+      const booking = await Booking.findByPk(bookingId, {
+        include: [
+          {
+            model: TimeSlot,
+            as: 'timeSlots',
+            include: [
+              {
+                model: SubField,
+                as: 'subfield',
+                include: [
+                  {
+                    model: Field,
+                    as: 'field',
+                    include: [
+                      {
+                        model: Location,
+                        as: 'location'
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          { 
+            model: Payment, 
+            as: 'payment' 
+          }
+        ]
+      });
+      
+      if (!booking) {
+        logger.error(`Booking not found: ${bookingId}`);
+        return res.status(404).json(responseFormatter.error({
+          code: 404,
+          message: 'Booking not found'
+        }));
+      }
+      
+      // Check if booking status allows payment
+      if (booking.status === 'cancelled') {
+        return res.status(400).json(responseFormatter.error({
+          code: 400,
+          message: 'Booking has been cancelled'
+        }));
+      }
+      
+      if (booking.payment_status === 'paid') {
+        return res.status(400).json(responseFormatter.error({
+          code: 400,
+          message: 'Booking has already been paid'
+        }));
+      }
+      
+      const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+      
+      // Get field information from nested relationship or fallback to metadata
+      const firstTimeSlot = booking.timeSlots?.[0];
+      let field = firstTimeSlot?.subfield?.field;
+      
+      // Fallback to metadata if relationship is missing (e.g., for cancelled bookings)
+      if (!field && booking.booking_metadata?.fieldId) {
+        console.log('Field relationship missing, using metadata fallback for booking:', bookingId);
+        try {
+          field = await Field.findByPk(booking.booking_metadata.fieldId, {
+            include: [
+              {
+                model: Location,
+                as: 'location'
+              }
+            ]
+          });
+        } catch (metadataError) {
+          console.error('Error fetching field from metadata:', metadataError);
+        }
+      }
+      
+      if (!field) {
+        logger.error('Field information not found for booking:', bookingId);
+        return res.status(400).json(responseFormatter.error({
+          code: 400,
+          message: 'Field information not found'
+        }));
+      }
+
+      // Create a new Checkout Session với đầy đủ thông tin customer
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        customer_email: booking.customer_info?.email || '', // Thêm customer email
+        line_items: [
+          {
+            price_data: {
+              currency: 'vnd',
+              product_data: {
+                name: `Đặt sân ${field.name}`,
+                description: `Ngày ${booking.booking_date}`,
+                metadata: {
+                  booking_id: booking.id,
+                  field_name: field.name,
+                  booking_date: booking.booking_date
+                }
+              },
+              unit_amount: Math.round(booking.total_price) // VND doesn't have cents, use actual amount
+            },
+            quantity: 1,
+          },
+        ],
+        mode: 'payment',
+        metadata: {
+          booking_id: booking.id,
+          user_id: booking.user_id || 'guest',
+          customer_email: booking.customer_info?.email || '',
+          customer_name: booking.customer_info?.name || '',
+          field_name: field.name,
+          booking_date: booking.booking_date
+        },
+        success_url: `${new URL(return_url).origin}/booking-history?payment=success&booking_id=${booking.id}&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: cancel_url || `${process.env.FRONTEND_URL || 'http://localhost:5173'}/booking-history?payment=cancel`,
+        client_reference_id: booking.id
+      });
+      
+      // Update payment record with new session
+      if (booking.payment) {
+        await booking.payment.update({
+          stripe_session_id: session.id,
+          updated_at: new Date()
+        });
+      } else {
+        // Create new payment record if one doesn't exist
+        await Payment.create({
+          booking_id: booking.id,
+          status: 'pending',
+          amount: booking.total_price,
+          currency: 'vnd',
+          customer_email: booking.customer_info?.email || '',
+          customer_name: booking.customer_info?.name || '',
+          stripe_session_id: session.id,
+          created_at: new Date(),
+          updated_at: new Date()
+        });
+      }
+      
+      return res.status(200).json(responseFormatter.success({
+        message: 'Payment session created successfully',
+        data: {
+          booking_id: booking.id,
+          checkout_url: session.url,
+          session_id: session.id,
+          payment_id: booking.payment?.id || null,
+          amount: booking.total_price,
+          currency: 'vnd'
+        }
+      }));
+      
+    } catch (error) {
+      logger.error('Error continuing payment:', error);
+      return res.status(500).json(responseFormatter.error({
+        code: 500,
+        message: 'Failed to create payment session'
+      }));
+    }
+  }
+
+  /**
    * Helper method to get full booking details
    * @private
    */
@@ -1655,7 +2032,7 @@ class PaymentController {
         include: [
           {
             model: TimeSlot,
-            as: 'timeslots'
+            as: 'timeSlots'
           },
           {
             model: Payment,
@@ -1676,6 +2053,7 @@ class PaymentController {
         include: [
           {
             model: Location,
+            as: 'location',
             attributes: ['address_text', 'city', 'district', 'ward']
           },
           {
@@ -1685,6 +2063,7 @@ class PaymentController {
           },
           {
             model: SubField,
+            as: 'subfields',
             attributes: ['id', 'name', 'field_type']
           }
         ],

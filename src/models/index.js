@@ -46,8 +46,8 @@ User.hasMany(Message, { foreignKey: 'sender_id' });
 Message.belongsTo(User, { foreignKey: 'sender_id', as: 'sender' });
 
 // Field relationships
-Field.hasMany(SubField, { foreignKey: 'field_id' });
-SubField.belongsTo(Field, { foreignKey: 'field_id' });
+Field.hasMany(SubField, { foreignKey: 'field_id', as: 'subfields' });
+SubField.belongsTo(Field, { foreignKey: 'field_id', as: 'field' });
 
 Field.hasMany(Review, { foreignKey: 'field_id' });
 Review.belongsTo(Field, { foreignKey: 'field_id' });
@@ -58,20 +58,20 @@ Favorite.belongsTo(Field, { foreignKey: 'field_id' });
 Field.hasMany(Promotion, { foreignKey: 'field_id' });
 Promotion.belongsTo(Field, { foreignKey: 'field_id' });
 
-Field.belongsTo(Location, { foreignKey: 'location_id' });
-Location.hasMany(Field, { foreignKey: 'location_id' });
-
-// SubField relationships
-SubField.hasMany(TimeSlot, { foreignKey: 'sub_field_id' });
-TimeSlot.belongsTo(SubField, { foreignKey: 'sub_field_id' });
+Field.belongsTo(Location, { foreignKey: 'location_id', as: 'location' });
+Location.hasMany(Field, { foreignKey: 'location_id', as: 'fields' });
 
 // Booking relationships
-Booking.hasMany(TimeSlot, { foreignKey: 'booking_id' });
-TimeSlot.belongsTo(Booking, { foreignKey: 'booking_id' });
+Booking.hasMany(TimeSlot, { foreignKey: 'booking_id', as: 'timeSlots' });
+TimeSlot.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
+
+// SubField relationships  
+SubField.hasMany(TimeSlot, { foreignKey: 'sub_field_id', as: 'timeSlots' });
+TimeSlot.belongsTo(SubField, { foreignKey: 'sub_field_id', as: 'subfield' });
 
 // Payment relationships
-Booking.hasOne(Payment, { foreignKey: 'booking_id' });
-Payment.belongsTo(Booking, { foreignKey: 'booking_id' });
+Booking.hasOne(Payment, { foreignKey: 'booking_id', as: 'payment' });
+Payment.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
 
 // Chat and Message relationships
 Chat.hasMany(Message, { foreignKey: 'chat_id' });

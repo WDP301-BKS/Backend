@@ -18,6 +18,7 @@ const generateTimeSlots = async (params) => {
   const subField = await SubField.findByPk(subFieldId, {
     include: [{
       model: Field,
+      as: 'field',
       attributes: ['price_per_hour']
     }]
   });
@@ -188,6 +189,7 @@ const getTimeSlotsByDate = async (subFieldId, date) => {
       model: SubField,
       include: [{
         model: Field,
+        as: 'field',
         attributes: ['price_per_hour']
       }]
     }],
@@ -225,6 +227,7 @@ const getTimeSlotsInRange = async (subFieldId, startDate, endDate) => {
       model: SubField,
       include: [{
         model: Field,
+        as: 'field',
         attributes: ['price_per_hour']
       }]
     }],
@@ -274,6 +277,7 @@ const calculateSlotPrice = async (subFieldId, startTime, peakHourMultiplier = 1.
   const subField = await SubField.findByPk(subFieldId, {
     include: [{
       model: Field,
+      as: 'field',
       attributes: ['price_per_hour']
     }]
   });
@@ -302,6 +306,7 @@ const getSlotPriceInfo = async (slotId) => {
       model: SubField,
       include: [{
         model: Field,
+        as: 'field',
         attributes: ['price_per_hour']
       }]
     }]
@@ -453,6 +458,7 @@ const getSubFieldsByFieldId = async (fieldId) => {
     where: { field_id: fieldId },
     include: [{
       model: Field,
+      as: 'field',
       attributes: ['price_per_hour']
     }],
     order: [['name', 'ASC']]

@@ -19,11 +19,37 @@ const Booking = sequelize.define('booking', {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: false
   },
+  deposit_amount: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 0,
+    allowNull: false
+  },
   payment_status: {
-    type: DataTypes.ENUM('pending', 'paid', 'failed', 'refunded', 'processing'),
+    type: DataTypes.ENUM('pending', 'paid', 'failed', 'refunded', 'processing', 'partial', 'completed', 'cancelled'),
     defaultValue: 'pending'
   },
+  payment_method: {
+    type: DataTypes.STRING(100),
+    allowNull: true
+  },
   payment_due_date: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  cancellation_reason: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  refund_method: {
+    type: DataTypes.STRING(100),
+    allowNull: true
+  },
+  refund_amount: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 0,
+    allowNull: true
+  },
+  cancelled_at: {
     type: DataTypes.DATE,
     allowNull: true
   },

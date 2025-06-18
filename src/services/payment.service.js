@@ -273,6 +273,36 @@ class PaymentService {
 
       logger.info(`Payment succeeded for booking: ${payment.booking_id}`);
 
+      // Import socket functions at runtime to avoid circular dependency
+      try {
+        const { 
+          emitBookingStatusUpdate, 
+          emitBookingPaymentUpdate, 
+          emitBookingEvent 
+        } = require('../config/socket.config');
+        
+        // Emit real-time updates
+        emitBookingStatusUpdate(payment.booking_id, {
+          status: 'confirmed',
+          payment_status: 'paid',
+          userId: payment.Booking.user_id,
+          message: 'Payment completed successfully - Booking confirmed!'
+        });
+        
+        emitBookingPaymentUpdate(payment.booking_id, {
+          payment_status: 'paid',
+          status: 'succeeded',
+          userId: payment.Booking.user_id,
+          stripe_payment_intent_id: paymentIntent.id,
+          message: 'Payment processed successfully via payment intent'
+        });
+        
+        logger.info('Real-time notifications sent for payment success:', payment.booking_id);
+        
+      } catch (socketError) {
+        logger.error('Error sending real-time notifications (payment still processed):', socketError);
+      }
+
     } catch (error) {
       logger.error('Error handling payment success:', error);
       throw error;

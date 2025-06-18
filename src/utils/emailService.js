@@ -162,9 +162,70 @@ const sendBookingConfirmationEmail = async (to, username, bookingDetails) => {
   return sendEmail(to, subject, text, html);
 };
 
+/**
+ * Gửi email thông báo cho chủ sân về booking mới
+ * @param {string} to - Email chủ sân
+ * @param {string} ownerName - Tên chủ sân
+ * @param {Object} bookingDetails - Chi tiết đơn đặt sân
+ * @returns {Promise} - Promise chứa kết quả gửi email
+ */
+const sendOwnerBookingNotificationEmail = async (to, ownerName, bookingDetails) => {
+  const subject = 'Thông báo có đặt sân mới';
+  const text = `Xin chào ${ownerName},\n\nBạn có một đơn đặt sân mới với các thông tin sau:\n\nSân: ${bookingDetails.fieldName}\nKhách hàng: ${bookingDetails.customerName}\nSố điện thoại: ${bookingDetails.customerPhone}\nNgày: ${bookingDetails.date}\nThời gian: ${bookingDetails.startTime} - ${bookingDetails.endTime}\nTổng tiền: ${bookingDetails.totalAmount}\n\nVui lòng chuẩn bị sân cho khách hàng.\n\nTrân trọng,\nHệ thống Football Field Booking`;
+  
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #2196F3;">Thông báo đặt sân mới</h2>
+      <p>Xin chào <strong>${ownerName}</strong>,</p>
+      <p>Bạn có một đơn đặt sân mới với các thông tin sau:</p>
+      <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+        <tr style="background-color: #f2f2f2;">
+          <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Thông tin</th>
+          <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Chi tiết</th>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #ddd; padding: 8px;">Sân</td>
+          <td style="border: 1px solid #ddd; padding: 8px;"><strong>${bookingDetails.fieldName}</strong></td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #ddd; padding: 8px;">Khách hàng</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${bookingDetails.customerName}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #ddd; padding: 8px;">Số điện thoại</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${bookingDetails.customerPhone}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #ddd; padding: 8px;">Email</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${bookingDetails.customerEmail}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #ddd; padding: 8px;">Ngày</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${bookingDetails.date}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #ddd; padding: 8px;">Thời gian</td>
+          <td style="border: 1px solid #ddd; padding: 8px;">${bookingDetails.startTime} - ${bookingDetails.endTime}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #ddd; padding: 8px;">Tổng tiền</td>
+          <td style="border: 1px solid #ddd; padding: 8px;"><strong style="color: #4CAF50;">${bookingDetails.totalAmount}</strong></td>
+        </tr>
+      </table>
+      <div style="background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0;">
+        <p style="margin: 0; color: #2e7d32;"><strong>Lưu ý:</strong> Vui lòng chuẩn bị sân cho khách hàng đúng giờ đã đặt.</p>
+      </div>
+      <p>Trân trọng,<br>Hệ thống Football Field Booking</p>
+    </div>
+  `;
+
+  return sendEmail(to, subject, text, html);
+};
+
 module.exports = {
   sendEmail,
   sendRegistrationEmail,
   sendPasswordResetEmail,
-  sendBookingConfirmationEmail
-}; 
+  sendBookingConfirmationEmail,
+  sendOwnerBookingNotificationEmail
+};

@@ -53,4 +53,26 @@ logger.stream = {
   write: (message) => logger.http(message.trim())
 };
 
-module.exports = logger; 
+// Helper function to log email operations
+const logEmailOperation = (operation, recipient, type, success, error = null) => {
+  const logData = {
+    operation,
+    recipient,
+    type, // 'customer_confirmation' or 'owner_notification'
+    success,
+    timestamp: new Date().toISOString()
+  };
+
+  if (error) {
+    logData.error = error.message || error;
+  }
+
+  if (success) {
+    logger.info(`Email ${operation} successful`, logData);
+  } else {
+    logger.error(`Email ${operation} failed`, logData);
+  }
+};
+
+module.exports = logger;
+module.exports.logEmailOperation = logEmailOperation;

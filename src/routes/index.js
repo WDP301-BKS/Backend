@@ -40,7 +40,6 @@ router.use('/bookings', bookingRoutes);
 // Mount payment routes
 router.use('/payments', paymentRoutes);
 
-module.exports = router; 
 // Mount timeslot routes
 router.use('/slots', timeSlotRoutes);
 
