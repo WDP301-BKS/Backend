@@ -451,6 +451,10 @@ const updateTimeSlotStatus = async (slotId, status, metadata = {}) => {
 const getSubFieldsByFieldId = async (fieldId) => {
   const subFields = await SubField.findAll({
     where: { field_id: fieldId },
+    include: [{
+      model: Field,
+      attributes: ['price_per_hour']
+    }],
     order: [['name', 'ASC']]
   });
 
@@ -459,7 +463,8 @@ const getSubFieldsByFieldId = async (fieldId) => {
     name: subField.name,
     fieldId: subField.field_id,
     fieldType: subField.field_type,
-    image: subField.image
+    image: subField.image,
+    pricePerHour: subField.field?.price_per_hour || 0
   }));
 };
 
