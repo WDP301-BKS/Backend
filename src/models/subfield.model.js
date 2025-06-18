@@ -17,9 +17,8 @@ const SubField = sequelize.define('subfield', {
   },
   image: {
     type: DataTypes.TEXT
-  },
-  field_type: {
-    type: DataTypes.ENUM('indoor', 'outdoor', 'hybrid')
+  },  field_type: {
+    type: DataTypes.ENUM('5vs5', '7vs7')
   }
 }, {
   timestamps: false

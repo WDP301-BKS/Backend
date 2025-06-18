@@ -1,4 +1,5 @@
 const { Field, User, Location, SubField } = require('../models');
+const { Op } = require('sequelize');
 const { successResponse, errorResponse, forbiddenResponse } = require('../common/responses/apiResponse');
 const { USER_ROLES } = require('../common/constants');
 const excel = require('exceljs');
@@ -233,6 +234,11 @@ class AdminController {
       const offset = (page - 1) * limit;
 
       const { count, rows } = await User.findAndCountAll({
+        where: {
+          role: {
+            [Op.ne]: USER_ROLES.ADMIN // Loại trừ admin
+          }
+        },
         attributes: [
           'id',
           'name',

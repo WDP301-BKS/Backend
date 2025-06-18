@@ -39,7 +39,13 @@ const authMiddleware = asyncHandler(async (req, res, next) => {
       phone: user.phone,
       is_active: user.is_active,
       createdAt: user.createdAt,
-      updatedAt: user.updatedAt
+      updatedAt: user.updatedAt,
+      // Thêm các trường liên quan đến gói dịch vụ
+      package_type: user.package_type,
+      package_purchase_date: user.package_purchase_date,
+      business_license_image: user.business_license_image,
+      identity_card_image: user.identity_card_image,
+      identity_card_back_image: user.identity_card_back_image
     };
     
     next();
@@ -106,7 +112,13 @@ const optionalAuthMiddleware = asyncHandler(async (req, res, next) => {
         phone: user.phone,
         is_active: user.is_active,
         createdAt: user.createdAt,
-        updatedAt: user.updatedAt
+        updatedAt: user.updatedAt,
+        // Thêm các trường liên quan đến gói dịch vụ
+        package_type: user.package_type,
+        package_purchase_date: user.package_purchase_date,
+        business_license_image: user.business_license_image,
+        identity_card_image: user.identity_card_image,
+        identity_card_back_image: user.identity_card_back_image
       };
     } else {
       req.user = null;

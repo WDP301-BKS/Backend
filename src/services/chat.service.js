@@ -14,7 +14,7 @@ class ChatService {
     // Kiểm tra user2 có tồn tại không
     const user2 = await User.findByPk(user2Id);
     if (!user2) {
-      throw new NotFoundError("User not found");
+      throw new NotFoundError("Không tìm thấy người dùng");
     }
     // Kiểm tra không thể chat với chính mình
     if (user1Id === user2Id) {

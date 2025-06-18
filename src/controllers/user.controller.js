@@ -24,7 +24,7 @@ const getCurrentUser = asyncHandler(async (req, res) => {
     const user = await User.findByPk(req.user.id);
     
     if (!user) {
-      return errorResponse(res, 'User not found', HTTP_STATUS.NOT_FOUND);
+      return errorResponse(res, 'Không tìm thấy người dùng', HTTP_STATUS.NOT_FOUND);
     }
 
     // Ensure all fields are included in the response
@@ -71,7 +71,7 @@ const updateCurrentUser = asyncHandler(async (req, res) => {
     const user = await User.findByPk(userId);
     
     if (!user) {
-      return errorResponse(res, 'User not found after update', HTTP_STATUS.NOT_FOUND);
+      return errorResponse(res, 'Không tìm thấy người dùng sau khi cập nhật', HTTP_STATUS.NOT_FOUND);
     }
     
     // Return the same structure as getCurrentUser
@@ -166,7 +166,7 @@ const changePassword = asyncHandler(async (req, res) => {
     // First verify the current password
     const user = await User.findByPk(userId);
     if (!user) {
-      return errorResponse(res, 'User not found', HTTP_STATUS.NOT_FOUND);
+      return errorResponse(res, 'Không tìm thấy người dùng', HTTP_STATUS.NOT_FOUND);
     }
 
     // Compare password using passwordUtils directly

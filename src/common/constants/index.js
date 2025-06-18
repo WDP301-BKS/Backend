@@ -26,14 +26,14 @@ const HTTP_STATUS = {
  */
 const ERROR_MESSAGES = {
   // Auth errors
-  INVALID_CREDENTIALS: 'Invalid email or password',
-  UNAUTHORIZED: 'Unauthorized access',
-  FORBIDDEN: 'Access forbidden',
+  INVALID_CREDENTIALS: 'Email hoặc mật khẩu không hợp lệ.',
+  UNAUTHORIZED: 'Truy cập không được phép.',
+  FORBIDDEN: 'Truy cập bị cấm.',
   EMAIL_ALREADY_EXISTS: 'Email already in use',
-  USER_NOT_FOUND: 'User not found',
-  ACCOUNT_INACTIVE: 'Account is inactive',
-  INVALID_TOKEN: 'Invalid token',
-  TOKEN_EXPIRED: 'Token has expired',
+  USER_NOT_FOUND: 'Không tìm thấy người dùng',
+  ACCOUNT_INACTIVE: 'Tài khoản chưa được kích hoạt.',
+  INVALID_TOKEN: 'Mã xác thực không hợp lệ',
+  TOKEN_EXPIRED: 'Mã xác thực đã hết hạn.',
   
   // Validation errors
   VALIDATION_ERROR: 'Validation failed',
@@ -47,10 +47,10 @@ const ERROR_MESSAGES = {
  * Hằng số cho các thông báo thành công
  */
 const SUCCESS_MESSAGES = {
-  USER_REGISTERED: 'User registered successfully',
-  USER_UPDATED: 'User updated successfully',
-  USER_DELETED: 'User deleted successfully',
-  LOGIN_SUCCESS: 'Login successful',
+  USER_REGISTERED: 'Đăng ký người dùng thành công.',
+  USER_UPDATED: 'Cập nhật người dùng thành công.',
+  USER_DELETED: 'Xóa người dùng thành công.',
+  LOGIN_SUCCESS: 'Đăng nhập thành công.',
 };
 
 /**

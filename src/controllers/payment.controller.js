@@ -704,7 +704,7 @@ class PaymentController {
   }
 
   /**
-   * Handle successful checkout session
+   * Handle successful checkout session (booking or package)
    */
   async handleCheckoutSessionCompleted(session) {
     try {
@@ -713,130 +713,138 @@ class PaymentController {
         id: session.id,
         payment_intent: session.payment_intent,
         payment_status: session.payment_status,
-        client_reference_id: session.client_reference_id
+        client_reference_id: session.client_reference_id,
+        metadata: session.metadata
       });
-      
-      // Use transaction to ensure data consistency
+
+      // Xác định loại giao dịch từ metadata hoặc client_reference_id
+      // Giả định: metadata.type = 'booking' | 'package', metadata.userId, metadata.packageType
+      const type = session.metadata?.type || 'booking';
       const transaction = await sequelize.transaction();
-      
+
       try {
-        // Find the booking using client_reference_id
-        const booking = await Booking.findByPk(session.client_reference_id, { transaction });
-        if (!booking) {
-          logger.error('Booking not found for session:', session.id);
-          await transaction.rollback();
-          return;
-        }
-        
-        logger.info('Found booking:', {
-          id: booking.id,
-          status: booking.status,
-          payment_status: booking.payment_status
-        });
-        
-        // Check if booking is already confirmed (to avoid duplicate processing)
-        const wasAlreadyConfirmed = booking.status === 'confirmed' && booking.payment_status === 'paid';
-        
-        // Update booking status (idempotent operation)
-        await booking.update({
-          status: 'confirmed',
-          payment_status: 'paid'
-        }, { transaction });
-        
-        logger.info('Booking updated successfully to confirmed status');
-        
-        // Update payment record
-        const updateResult = await Payment.update(
-          {
-            status: 'succeeded', // Correct field name
-            stripe_payment_intent_id: session.payment_intent,
-            stripe_session_id: session.id,
-            processed_at: new Date(), // Correct field name
-            updated_at: new Date()
-          },
-          {
-            where: { booking_id: booking.id },
-            transaction
+        if (type === 'package') {
+          // Thanh toán mua package
+          const userId = session.metadata?.userId;
+          const packageType = session.metadata?.packageType;
+          if (!userId || !packageType) {
+            logger.error('Missing userId or packageType in session metadata for package payment');
+            await transaction.rollback();
+            return;
           }
-        );
-        
-        logger.info(`Payment record updated: ${updateResult[0]} row(s) affected`);
-        
-        // Time slots should already exist from atomic booking creation
-        // Just update them to confirmed status if payment successful
-        if (!wasAlreadyConfirmed) {
-          const existingTimeSlots = await TimeSlot.findAll({
-            where: {
-              booking_id: booking.id
-            },
-            transaction
-          });
-
-          if (existingTimeSlots.length > 0) {
-            // Time slots already exist, just ensure they're properly marked as unavailable
-            await TimeSlot.update(
-              { is_available: false },
-              {
-                where: { booking_id: booking.id },
-                transaction
-              }
-            );
-            logger.info(`Confirmed ${existingTimeSlots.length} existing time slots for booking:`, booking.id);
-          } else {
-            logger.warn('No time slots found for booking - this should not happen with atomic creation');
+          const user = await User.findByPk(userId, { transaction });
+          if (!user) {
+            logger.error('User not found for package payment:', userId);
+            await transaction.rollback();
+            return;
           }
+          // Cập nhật thông tin package cho user
+          await user.update({
+            package_type: packageType,
+            package_purchase_date: new Date()
+          }, { transaction });
+          logger.info('User package updated successfully:', userId);
+          await transaction.commit();
+          // TODO: Gửi thông báo, email, v.v. cho user về việc mua package thành công
         } else {
-          logger.info('Booking was already confirmed, time slots already exist');
-        }
-
-        await transaction.commit();
-        logger.info('Booking confirmed successfully:', booking.id);
-        
-        // Emit real-time updates via WebSocket
-        try {
-          // Emit booking status update
-          emitBookingStatusUpdate(booking.id, {
+          // ...existing code for booking payment...
+          // Find the booking using client_reference_id
+          const booking = await Booking.findByPk(session.client_reference_id, { transaction });
+          if (!booking) {
+            logger.error('Booking not found for session:', session.id);
+            await transaction.rollback();
+            return;
+          }
+          logger.info('Found booking:', {
+            id: booking.id,
+            status: booking.status,
+            payment_status: booking.payment_status
+          });
+          // Check if booking is already confirmed (to avoid duplicate processing)
+          const wasAlreadyConfirmed = booking.status === 'confirmed' && booking.payment_status === 'paid';
+          // Update booking status (idempotent operation)
+          await booking.update({
             status: 'confirmed',
-            payment_status: 'paid',
-            userId: booking.user_id,
-            message: 'Payment successful - Booking confirmed!'
-          });
-          
-          // Emit booking payment update
-          emitBookingPaymentUpdate(booking.id, {
-            payment_status: 'paid',
-            status: 'succeeded',
-            userId: booking.user_id,
-            stripe_session_id: session.id,
-            stripe_payment_intent_id: session.payment_intent,
-            message: 'Payment processed successfully'
-          });
-          
-          // Emit general booking event for broader notifications
-          emitBookingEvent('payment_confirmed', booking.id, {
-            userId: booking.user_id,
-            status: 'confirmed',
-            payment_status: 'paid',
-            message: 'Your booking has been confirmed and payment processed successfully!'
-          });
-          
-          logger.info('Real-time notifications sent for booking confirmation:', booking.id);
-          
-        } catch (socketError) {
-          // Log socket errors but don't fail the webhook
-          logger.error('Error sending real-time notifications (webhook still succeeded):', socketError);
+            payment_status: 'paid'
+          }, { transaction });
+          logger.info('Booking updated successfully to confirmed status');
+          // Update payment record
+          const updateResult = await Payment.update(
+            {
+              status: 'succeeded',
+              stripe_payment_intent_id: session.payment_intent,
+              stripe_session_id: session.id,
+              processed_at: new Date(),
+              updated_at: new Date()
+            },
+            {
+              where: { booking_id: booking.id },
+              transaction
+            }
+          );
+          logger.info(`Payment record updated: ${updateResult[0]} row(s) affected`);
+          // Time slots should already exist from atomic booking creation
+          // Just update them to confirmed status if payment successful
+          if (!wasAlreadyConfirmed) {
+            const existingTimeSlots = await TimeSlot.findAll({
+              where: {
+                booking_id: booking.id
+              },
+              transaction
+            });
+            if (existingTimeSlots.length > 0) {
+              // Time slots already exist, just ensure they're properly marked as unavailable
+              await TimeSlot.update(
+                { is_available: false },
+                {
+                  where: { booking_id: booking.id },
+                  transaction
+                }
+              );
+              logger.info(`Confirmed ${existingTimeSlots.length} existing time slots for booking:`, booking.id);
+            } else {
+              logger.warn('No time slots found for booking - this should not happen with atomic creation');
+            }
+          } else {
+            logger.info('Booking was already confirmed, time slots already exist');
+          }
+          await transaction.commit();
+          logger.info('Booking confirmed successfully:', booking.id);
+          // Emit real-time updates via WebSocket
+          try {
+            emitBookingStatusUpdate(booking.id, {
+              status: 'confirmed',
+              payment_status: 'paid',
+              userId: booking.user_id,
+              message: 'Payment successful - Booking confirmed!'
+            });
+            emitBookingPaymentUpdate(booking.id, {
+              payment_status: 'paid',
+              status: 'succeeded',
+              userId: booking.user_id,
+              stripe_session_id: session.id,
+              stripe_payment_intent_id: session.payment_intent,
+              message: 'Payment processed successfully'
+            });
+            emitBookingEvent('payment_confirmed', booking.id, {
+              userId: booking.user_id,
+              status: 'confirmed',
+              payment_status: 'paid',
+              message: 'Your booking has been confirmed and payment processed successfully!'
+            });
+            logger.info('Real-time notifications sent for booking confirmation:', booking.id);
+          } catch (socketError) {
+            logger.error('Error sending real-time notifications (webhook still succeeded):', socketError);
+          }
+          // TODO: Send confirmation email
         }
-        
-        // TODO: Send confirmation email
-        
       } catch (transactionError) {
         await transaction.rollback();
         throw transactionError;
       }
-      
     } catch (error) {
       logger.error('Error handling checkout session completed:', error);
-      throw error; // Re-throw to ensure webhook handler knows about the failure
+      throw error;
     }
   }
 
@@ -1739,6 +1747,74 @@ class PaymentController {
     } catch (error) {
       logger.error(`Error in getBookingDetails for booking ${bookingId}:`, error);
       return null;
+    }
+  }
+
+  /**
+   * Create payment intent for package purchase
+   */
+  async createPackagePayment(req, res) {
+    logger.info('createPackagePayment method called');
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json(responseFormatter.error({
+          code: 'UNAUTHORIZED',
+          message: 'Bạn cần đăng nhập để mua gói dịch vụ'
+        }));
+      }
+      const { packageType, return_url, cancel_url } = req.body;
+      if (!packageType || !['basic', 'premium'].includes(packageType)) {
+        return res.status(400).json(responseFormatter.error({
+          code: 400,
+          message: 'Loại gói dịch vụ không hợp lệ'
+        }));
+      }
+      // Lấy giá từ config (tránh user tự gửi giá)
+      const SERVICE_PLANS = {
+        basic: 599000,
+        premium: 3099000
+      };
+      const amount = SERVICE_PLANS[packageType];
+      // Tạo session thanh toán Stripe (hoặc VNPay...)
+      const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price_data: {
+              currency: 'vnd',
+              product_data: {
+                name: `Gói dịch vụ: ${packageType}`,
+              },
+              unit_amount: amount,
+            },
+            quantity: 1,
+          },
+        ],
+        mode: 'payment',
+        success_url: return_url || process.env.FRONTEND_URL + '/payment/success',
+        cancel_url: cancel_url || process.env.FRONTEND_URL + '/payment/cancel',
+        metadata: {
+          type: 'package',
+          userId,
+          packageType
+        },
+        client_reference_id: userId
+      });
+      return res.json(responseFormatter.success({
+        checkout_url: session.url,
+        session_id: session.id,
+        amount,
+        currency: 'vnd',
+        packageType
+      }));
+    } catch (error) {
+      logger.error('Error in createPackagePayment:', error);
+      return res.status(500).json(responseFormatter.error({
+        code: 500,
+        message: error.message
+      }));
     }
   }
 }
