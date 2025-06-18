@@ -694,9 +694,9 @@ const updateFieldWithFiles = async (req, res) => {
 // Get field detail
 const getFieldDetail = async (req, res) => {
     try {
-        const { id } = req.params;
+        const fieldId = req.params.id;
 
-        const field = await Field.findByPk(id, {
+        const field = await Field.findByPk(fieldId, {
             include: [
                 {
                     model: User,

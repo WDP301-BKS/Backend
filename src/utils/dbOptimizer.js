@@ -147,9 +147,7 @@ SELECT id, name, field_type
     if (cached) {
       // Filter cached results for requested time slots
       return this.filterAvailabilityForSlots(cached, timeSlots);
-    }
-
-    // Use raw SQL for better performance
+    }    // Use raw SQL for better performance - Updated with user and booking info
     const query = `
       SELECT 
         ts.sub_field_id,
@@ -158,15 +156,25 @@ SELECT id, name, field_type
         ts.is_available,
         ts.booking_id,
         sf.name as subfield_name,
-        sf.field_type
+        sf.field_type,
+        b.status as booking_status,
+        b.payment_status,
+        b.total_price as final_price,
+        b.customer_info,
+        u.name as customer_name,
+        u.phone as customer_phone,
+        b.created_at as booking_date
       FROM timeslots ts
       INNER JOIN subfields sf ON ts.sub_field_id = sf.id
+      LEFT JOIN bookings b ON ts.booking_id = b.id
+      LEFT JOIN users u ON b.user_id = u.id
       WHERE sf.field_id = :fieldId 
         AND ts.date = :date
         AND ts.is_available = false
+        AND (b.status IS NULL OR b.status NOT IN ('cancelled'))
       ORDER BY ts.sub_field_id, ts.start_time
     `;
-
+    
     const unavailableSlots = await sequelize.query(query, {
       replacements: { fieldId, date },
       type: QueryTypes.SELECT
