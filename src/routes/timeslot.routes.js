@@ -59,6 +59,20 @@ router.patch(
   timeSlotController.updateTimeSlotStatus
 );
 
+// API cập nhật hệ số peak hour cho time slot
+router.patch(
+  "/:slotId/peak-hour",
+  authMiddleware,
+  timeSlotController.updatePeakHourMultiplier
+);
+
+// API cập nhật hệ số peak hour theo bulk
+router.patch(
+  "/bulk-update-peak-hour",
+  authMiddleware,
+  timeSlotController.bulkUpdatePeakHour
+);
+
 // API xóa time slot riêng lẻ
 router.delete(
   "/:slotId",

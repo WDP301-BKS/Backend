@@ -44,4 +44,4 @@ const Field = sequelize.define('field', {
   updatedAt: 'updated_at'
 });
 
-module.exports = Field; 
+module.exports = Field;

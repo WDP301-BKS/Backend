@@ -12,6 +12,7 @@ const Notification = require('./notification.model');
 const BlacklistUser = require('./blacklist_user.model');
 const Chat = require('./chat.model');
 const Message = require('./message.model');
+const FieldPricingRule = require('./field_pricing_rule.model');
 const { sequelize, testDbConnection } = require('../config/db.config');
 
 // Define relationships
@@ -61,11 +62,15 @@ Promotion.belongsTo(Field, { foreignKey: 'field_id' });
 Field.belongsTo(Location, { foreignKey: 'location_id', as: 'location' });
 Location.hasMany(Field, { foreignKey: 'location_id', as: 'fields' });
 
+// Field pricing rule relationships
+Field.hasMany(FieldPricingRule, { foreignKey: 'field_id', as: 'pricingRules' });
+FieldPricingRule.belongsTo(Field, { foreignKey: 'field_id', as: 'field' });
+
 // Booking relationships
 Booking.hasMany(TimeSlot, { foreignKey: 'booking_id', as: 'timeSlots' });
 TimeSlot.belongsTo(Booking, { foreignKey: 'booking_id', as: 'booking' });
 
-// SubField relationships  
+// SubField relationships (TimeSlot associations)  
 SubField.hasMany(TimeSlot, { foreignKey: 'sub_field_id', as: 'timeSlots' });
 TimeSlot.belongsTo(SubField, { foreignKey: 'sub_field_id', as: 'subfield' });
 
@@ -103,7 +108,8 @@ module.exports = {
   BlacklistUser,
   Chat,
   Message,
+  FieldPricingRule,
   sequelize,
   testDbConnection,
   syncModels
-}; 
+};
