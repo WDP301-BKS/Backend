@@ -10,6 +10,7 @@ const bookingRoutes = require('./booking.routes');
 const paymentRoutes = require('./payment.routes');
 const timeSlotRoutes = require('./timeslot.routes');
 const fieldPricingRuleRoutes = require('./field_pricing_rule.routes');
+const maintenanceRoutes = require('./maintenance.routes');
 
 const adminRoutes = require('./admin.routes');
 
@@ -46,5 +47,8 @@ router.use('/slots', timeSlotRoutes);
 
 // Mount field pricing rule routes
 router.use('/pricing-rules', fieldPricingRuleRoutes);
+
+// Mount maintenance routes
+router.use('/maintenance', maintenanceRoutes);
 
 module.exports = router;

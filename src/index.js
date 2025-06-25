@@ -10,6 +10,7 @@ const requestLoggerMiddleware = require('./middlewares/requestLogger');
 const requestIdMiddleware = require('./middlewares/requestId');
 const responseFormatter = require('./utils/responseFormatter');
 const { initializeSocket } = require('./config/socket.config');
+const { setSocketInstance } = require('./utils/socketInstance');
 
 // Load environment variables
 dotenv.config();
@@ -28,6 +29,9 @@ const server = http.createServer(app);
 
 // Initialize Socket.IO
 const io = initializeSocket(server);
+
+// Set the socket instance for global use
+setSocketInstance(io);
 
 // CORS Configuration
 app.use(cors({
@@ -141,3 +145,6 @@ const startServer = async () => {
 };
 
 startServer();
+
+// Export the io instance for use in other modules
+module.exports = { app, server, io };

@@ -27,7 +27,27 @@ const TimeSlot = sequelize.define('timeslot', {
   },
   is_available: {
     type: DataTypes.BOOLEAN,
-    defaultValue: true
+    defaultValue: true,
+    get() {
+      // Dynamically calculate is_available based on status for backward compatibility
+      return this.getDataValue('status') === 'available';
+    }
+  },
+  status: {
+    type: DataTypes.STRING(20),
+    allowNull: false,
+    defaultValue: 'available',
+    validate: {
+      isIn: [['available', 'booked', 'maintenance']]
+    }
+  },
+  maintenance_reason: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
+  maintenance_until: {
+    type: DataTypes.DATE,
+    allowNull: true
   }
 }, {
   timestamps: false,

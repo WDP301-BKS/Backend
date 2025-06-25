@@ -88,6 +88,9 @@ const initializeSocket = (httpServer) => {
     // Booking-related event handlers
     setupBookingEvents(socket);
 
+    // Field-related event handlers for timeslot management
+    setupFieldEvents(socket);
+
     // Handle user online event
     socket.on('user_online', () => {
       socket.broadcast.emit('user_status_change', {
@@ -759,6 +762,243 @@ const setupBookingEvents = (socket) => {
       socket.emit('error', {
         type: 'SERVER_ERROR',
         message: 'Failed to sync booking status'
+      });
+    }
+  });
+};
+
+// Field event handlers
+const setupFieldEvents = (socket) => {
+  // Subscribe to field availability updates
+  socket.on('subscribe_field_availability', async (data) => {
+    try {
+      const { fieldId, date } = data;
+      
+      // Rate limiting check
+      if (!rateLimiter.checkLimit(socket.userId, 'subscribe_field_availability')) {
+        socket.emit('error', {
+          type: 'RATE_LIMIT_EXCEEDED',
+          message: 'Too many field availability requests. Please try again later.'
+        });
+        return;
+      }
+
+      // Validate input
+      if (!fieldId || !date) {
+        socket.emit('error', {
+          type: 'INVALID_INPUT',
+          message: 'Field ID and date are required'
+        });
+        return;
+      }
+
+      // Join the field room
+      socket.join(`field_${fieldId}_${date}`);
+      logger.info(`User ${socket.userId} subscribed to field ${fieldId} availability on ${date}`);
+
+      // Send current availability status
+      const { Field } = require('../models');
+      const field = await Field.findByPk(fieldId);
+      if (field) {
+        socket.emit('field_availability_update', {
+          fieldId,
+          date,
+          isAvailable: field.is_available,
+          timestamp: new Date()
+        });
+      }
+
+      socket.emit('field_subscription_success', {
+        fieldId,
+        date
+      });
+
+    } catch (error) {
+      logger.error('Error subscribing to field availability:', error);
+      socket.emit('error', {
+        type: 'SERVER_ERROR',
+        message: 'Failed to subscribe to field availability updates'
+      });
+    }
+  });
+
+  // Unsubscribe from field availability updates
+  socket.on('unsubscribe_field_availability', (data) => {
+    try {
+      const { fieldId, date } = data;
+      
+      // Rate limiting check
+      if (!rateLimiter.checkLimit(socket.userId, 'unsubscribe_field_availability')) {
+        socket.emit('error', {
+          type: 'RATE_LIMIT_EXCEEDED',
+          message: 'Too many field unsubscription requests. Please try again later.'
+        });
+        return;
+      }
+
+      if (!fieldId || !date) {
+        socket.emit('error', {
+          type: 'INVALID_INPUT',
+          message: 'Field ID and date are required'
+        });
+        return;
+      }
+
+      socket.leave(`field_${fieldId}_${date}`);
+      logger.info(`User ${socket.userId} unsubscribed from field ${fieldId} availability on ${date}`);
+
+      socket.emit('field_unsubscription_success', { fieldId, date });
+
+    } catch (error) {
+      logger.error('Error unsubscribing from field availability:', error);
+      socket.emit('error', {
+        type: 'SERVER_ERROR',
+        message: 'Failed to unsubscribe from field availability updates'
+      });
+    }
+  });
+
+  // Manual sync field availability request
+  socket.on('sync_field_availability', async (data) => {
+    try {
+      const { fieldId, date } = data;
+      
+      // Rate limiting check
+      if (!rateLimiter.checkLimit(socket.userId, 'sync_field_availability')) {
+        socket.emit('error', {
+          type: 'RATE_LIMIT_EXCEEDED',
+          message: 'Too many sync requests. Please try again later.'
+        });
+        return;
+      }
+
+      if (!fieldId || !date) {
+        socket.emit('error', {
+          type: 'INVALID_INPUT',
+          message: 'Field ID and date are required'
+        });
+        return;
+      }
+
+      // Check permission and get field
+      const { Field } = require('../models');
+      const field = await Field.findByPk(fieldId);
+      if (!field) {
+        socket.emit('error', {
+          type: 'UNAUTHORIZED',
+          message: 'You do not have permission to sync this field'
+        });
+        return;
+      }
+
+      // Emit updated availability status to field room
+      emitFieldAvailabilityUpdate(fieldId, date, {
+        isAvailable: field.is_available,
+        timestamp: new Date()
+      });
+
+      socket.emit('field_sync_complete', {
+        fieldId,
+        date,
+        isAvailable: field.is_available,
+        timestamp: new Date()
+      });
+
+    } catch (error) {
+      logger.error('Error syncing field availability:', error);
+      socket.emit('error', {
+        type: 'SERVER_ERROR',
+        message: 'Failed to sync field availability'
+      });
+    }
+  });
+
+  // Field event handlers for timeslot management
+  socket.on('join-field', (fieldId) => {
+    if (!fieldId) {
+      socket.emit('error', {
+        type: 'INVALID_INPUT',
+        message: 'Field ID is required'
+      });
+      return;
+    }
+
+    socket.join(`field-${fieldId}`);
+    logger.info(`User ${socket.userId} joined field room: field-${fieldId}`);
+    
+    socket.emit('field-joined', { fieldId });
+  });
+
+  socket.on('leave-field', (fieldId) => {
+    if (!fieldId) {
+      socket.emit('error', {
+        type: 'INVALID_INPUT',
+        message: 'Field ID is required'
+      });
+      return;
+    }
+
+    socket.leave(`field-${fieldId}`);
+    logger.info(`User ${socket.userId} left field room: field-${fieldId}`);
+    
+    socket.emit('field-left', { fieldId });
+  });  socket.on('request-maintenance-toggle', async (data) => {
+    try {
+      const { slotId, fieldId, reason, estimatedCompletion } = data;
+      
+      // Validate user permissions (only field owners can set maintenance)
+      if (socket.userRole !== 'owner') {
+        socket.emit('maintenance-toggle-error', {
+          type: 'UNAUTHORIZED',
+          message: 'Only field owners can set maintenance status'
+        });
+        return;
+      }
+
+      // Rate limiting
+      if (!rateLimiter.checkLimit(socket.userId, 'maintenance_toggle')) {
+        socket.emit('error', {
+          type: 'RATE_LIMIT_EXCEEDED',
+          message: 'Too many maintenance requests. Please try again later.'
+        });
+        return;
+      }
+
+      // Validate input
+      if (!slotId || !fieldId) {
+        socket.emit('error', {
+          type: 'INVALID_INPUT',
+          message: 'Slot ID and Field ID are required'
+        });
+        return;
+      }
+
+      // Import the timeslot service here to avoid circular dependencies
+      const timeslotService = require('../services/timeslot.service');
+      
+      // Toggle maintenance status
+      const result = await timeslotService.toggleMaintenanceStatus(
+        slotId,
+        reason,
+        estimatedCompletion,
+        io // Pass io instance for realtime updates
+      );
+
+      // Send success response back to the requesting client
+      socket.emit('maintenance-toggle-success', {
+        slotId,
+        newStatus: result.slot.status,
+        message: result.slot.status === 'maintenance' 
+          ? 'Đã đặt khung giờ vào trạng thái bảo trì' 
+          : 'Đã hủy trạng thái bảo trì'
+      });
+
+      logger.info(`User ${socket.userId} toggled maintenance for slot ${slotId} to ${result.slot.status}`);
+    } catch (error) {
+      logger.error('Error handling maintenance toggle:', error);
+      
+      socket.emit('maintenance-toggle-error', {
+        message: error.message || 'Lỗi khi thay đổi trạng thái bảo trì'
       });
     }
   });

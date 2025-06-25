@@ -147,4 +147,14 @@ exports.fromNow = (date, baseDate = null) => {
   return baseDate 
     ? dayjs(date).from(dayjs(baseDate))
     : dayjs(date).fromNow();
-}; 
+};
+
+/**
+ * Format a date for database storage
+ * @param {Date|string} date - Date to format
+ * @returns {string} Date formatted for database (YYYY-MM-DD)
+ */
+exports.formatDateForDB = (date) => {
+  if (!date) return null;
+  return dayjs(date).tz(DEFAULT_TIMEZONE).format('YYYY-MM-DD');
+};

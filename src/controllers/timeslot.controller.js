@@ -86,8 +86,107 @@ const bulkUpdatePeakHour = async (req, res) => {
   }
 };
 
+/**
+ * API lấy thông tin time slot theo ID
+ * GET /api/slots/:slotId
+ */
+const getTimeSlotById = async (req, res) => {
+  try {
+    const { slotId } = req.params;
+
+    const timeSlot = await timeSlotService.getTimeSlotById(slotId);
+
+    if (!timeSlot) {
+      return res.status(404).json(responseFormatter.error('Không tìm thấy khung giờ', 404));
+    }
+
+    return res.json(responseFormatter.success(timeSlot, 'Lấy thông tin khung giờ thành công'));
+  } catch (error) {
+    console.error('Error getting time slot:', error);
+    return res.status(500).json(responseFormatter.error(error.message || 'Lỗi lấy thông tin khung giờ', 500));
+  }
+};
+
+/**
+ * API cập nhật trạng thái time slot
+ * PATCH /api/slots/:slotId
+ */
+const updateTimeSlotStatus = async (req, res) => {
+  try {
+    const { slotId } = req.params;
+    const { status, is_available } = req.body;
+
+    if (!status && is_available === undefined) {
+      return res.status(400).json(responseFormatter.error('Vui lòng cung cấp trạng thái hoặc is_available', 400));
+    }
+
+    const updatedSlot = await timeSlotService.updateTimeSlot(slotId, {
+      ...(status && { status }),
+      ...(is_available !== undefined && { is_available })
+    });
+
+    return res.json(responseFormatter.success(updatedSlot, 'Cập nhật trạng thái khung giờ thành công'));
+  } catch (error) {
+    console.error('Error updating time slot:', error);
+    return res.status(500).json(responseFormatter.error(error.message || 'Lỗi cập nhật trạng thái khung giờ', 500));
+  }
+};
+
+/**
+ * API tìm time slot theo field, date và time
+ * GET /api/slots/find
+ */
+const findTimeSlotByFieldDateTime = async (req, res) => {
+  try {
+    const { subFieldId, date, startTime } = req.query;
+
+    if (!subFieldId || !date || !startTime) {
+      return res.status(400).json(responseFormatter.error('subFieldId, date và startTime là bắt buộc', 400));
+    }
+
+    // Tìm slot trong database
+    const { TimeSlot, SubField } = require('../models');
+    const slot = await TimeSlot.findOne({
+      where: {
+        sub_field_id: subFieldId,
+        date: date,
+        start_time: startTime
+      },
+      include: [{
+        model: SubField,
+        as: 'subfield',
+        attributes: ['id', 'name', 'field_id']
+      }]
+    });
+
+    if (!slot) {
+      return res.status(404).json(responseFormatter.error('Không tìm thấy khung giờ', 404));
+    }
+
+    const result = {
+      id: slot.id,
+      subFieldId: slot.sub_field_id,
+      date: slot.date,
+      startTime: slot.start_time,
+      endTime: slot.end_time,
+      status: slot.status,
+      maintenanceReason: slot.maintenance_reason,
+      maintenanceUntil: slot.maintenance_until,
+      subField: slot.subfield
+    };
+
+    return res.json(responseFormatter.success(result, 'Tìm thấy khung giờ'));
+  } catch (error) {
+    console.error('Error finding time slot:', error);
+    return res.status(500).json(responseFormatter.error(error.message || 'Lỗi tìm kiếm khung giờ', 500));
+  }
+};
+
 module.exports = {
   updatePeakHourMultiplier,
   bulkUpdatePeakHour,
-  getSubFieldsByFieldId
+  getSubFieldsByFieldId,
+  getTimeSlotById,
+  updateTimeSlotStatus,
+  findTimeSlotByFieldDateTime
 };
