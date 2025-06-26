@@ -886,7 +886,7 @@ class PaymentController {
             if (existingTimeSlots.length > 0) {
               // Time slots already exist, just ensure they're properly marked as unavailable
               await TimeSlot.update(
-                { is_available: false },
+                { status: 'booked' },
                 {
                   where: { booking_id: booking.id },
                   transaction
@@ -991,8 +991,8 @@ class PaymentController {
             if (field) {
               // Prepare booking details for email
               const timeSlots = bookingWithDetails.timeSlots || [];
-              const firstSlot = timeSlots[0];
-              const lastSlot = timeSlots[timeSlots.length - 1];
+              let startTime = '';
+              let endTime = '';
               
               // Create time ranges from start_time and end_time
               const formatTime = (timeStr) => {
@@ -1001,8 +1001,24 @@ class PaymentController {
                 return timeStr.substring(0, 5);
               };
               
-              const startTime = firstSlot ? formatTime(firstSlot.start_time) : '';
-              const endTime = lastSlot ? formatTime(lastSlot.end_time) : '';
+              // Try to get time from TimeSlots first
+              if (timeSlots.length > 0) {
+                const firstSlot = timeSlots[0];
+                const lastSlot = timeSlots[timeSlots.length - 1];
+                startTime = firstSlot ? formatTime(firstSlot.start_time) : '';
+                endTime = lastSlot ? formatTime(lastSlot.end_time) : '';
+              }
+              
+              // Fallback to booking metadata if TimeSlots don't have proper data
+              if (!startTime || !endTime) {
+                const metadataTimeSlots = bookingWithDetails.booking_metadata?.timeSlots || [];
+                if (metadataTimeSlots.length > 0) {
+                  const firstMetaSlot = metadataTimeSlots[0];
+                  const lastMetaSlot = metadataTimeSlots[metadataTimeSlots.length - 1];
+                  startTime = firstMetaSlot?.start_time || startTime;
+                  endTime = lastMetaSlot?.end_time || endTime;
+                }
+              }
               
               const bookingDetails = {
                 fieldName: field.name,
@@ -1014,6 +1030,8 @@ class PaymentController {
                   month: 'long',
                   day: 'numeric'
                 }),
+                startTime: startTime,
+                endTime: endTime,
                 timeRange: `${startTime} - ${endTime}`,
                 totalAmount: bookingWithDetails.total_price,
                 bookingId: bookingWithDetails.id
@@ -1022,6 +1040,14 @@ class PaymentController {
               // Send confirmation email to customer
               if (bookingDetails.customerEmail) {
                 try {
+                  logger.info('Sending confirmation email with details:', {
+                    customerEmail: bookingDetails.customerEmail,
+                    timeRange: bookingDetails.timeRange,
+                    startTime: startTime,
+                    endTime: endTime,
+                    source: 'handleCheckoutSessionCompleted'
+                  });
+                  
                   await sendBookingConfirmationEmail(
                     bookingDetails.customerEmail,
                     bookingDetails.customerName,
@@ -1676,7 +1702,7 @@ class PaymentController {
                     date: playDate,
                     sub_field_id: timeSlot.sub_field_id,
                     booking_id: booking.id,
-                    is_available: false
+                    status: 'booked'
                   }, { transaction });
                 }
                 return null;
@@ -1688,6 +1714,144 @@ class PaymentController {
             
             await transaction.commit();
             logger.info(`Successfully synced booking ${bookingId} to confirmed status`);
+            
+            // Send confirmation emails after successful sync
+            try {
+              // Get booking details with full data for email
+              const bookingWithDetails = await Booking.findByPk(booking.id, {
+                include: [
+                  {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'name', 'email']
+                  },
+                  {
+                    model: TimeSlot,
+                    as: 'timeSlots',
+                    attributes: ['id', 'start_time', 'end_time', 'date', 'sub_field_id'],
+                    include: [
+                      {
+                        model: SubField,
+                        as: 'subfield',
+                        attributes: ['id', 'name', 'field_id'],
+                        include: [
+                          {
+                            model: Field,
+                            as: 'field',
+                            attributes: ['id', 'name', 'owner_id'],
+                            include: [
+                              {
+                                model: User,
+                                as: 'owner',
+                                attributes: ['id', 'name', 'email']
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              });
+
+              if (bookingWithDetails && bookingWithDetails.user && bookingWithDetails.timeSlots && bookingWithDetails.timeSlots.length > 0) {
+                const firstTimeSlot = bookingWithDetails.timeSlots[0];
+                const field = firstTimeSlot.subfield?.field;
+                
+                if (field) {
+                  // Prepare booking details for email
+                  const timeSlots = bookingWithDetails.timeSlots || [];
+                  let startTime = '';
+                  let endTime = '';
+                  
+                  // Create time ranges from start_time and end_time
+                  const formatTime = (timeStr) => {
+                    if (!timeStr) return '';
+                    // timeStr is in format "HH:MM:SS", we want "HH:MM"
+                    return timeStr.substring(0, 5);
+                  };
+                  
+                  // Try to get time from TimeSlots first
+                  if (timeSlots.length > 0) {
+                    const firstSlot = timeSlots[0];
+                    const lastSlot = timeSlots[timeSlots.length - 1];
+                    startTime = firstSlot ? formatTime(firstSlot.start_time) : '';
+                    endTime = lastSlot ? formatTime(lastSlot.end_time) : '';
+                  }
+                  
+                  // Fallback to booking metadata if TimeSlots don't have proper data
+                  if (!startTime || !endTime) {
+                    const metadataTimeSlots = bookingWithDetails.booking_metadata?.timeSlots || [];
+                    if (metadataTimeSlots.length > 0) {
+                      const firstMetaSlot = metadataTimeSlots[0];
+                      const lastMetaSlot = metadataTimeSlots[metadataTimeSlots.length - 1];
+                      startTime = firstMetaSlot?.start_time || startTime;
+                      endTime = lastMetaSlot?.end_time || endTime;
+                    }
+                  }
+                  
+                  const bookingDetails = {
+                    fieldName: field.name,
+                    customerName: bookingWithDetails.customer_info?.name || bookingWithDetails.user.name,
+                    customerEmail: bookingWithDetails.customer_info?.email || bookingWithDetails.user.email,
+                    customerPhone: bookingWithDetails.customer_info?.phone || 'Không có thông tin',
+                    date: new Date(bookingWithDetails.booking_date).toLocaleDateString('vi-VN', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    }),
+                    startTime: startTime,
+                    endTime: endTime,
+                    timeRange: `${startTime} - ${endTime}`,
+                    totalAmount: bookingWithDetails.total_price,
+                    bookingId: bookingWithDetails.id
+                  };
+
+                  // Send confirmation email to customer
+                  if (bookingDetails.customerEmail) {
+                    try {
+                      logger.info('Sending confirmation email after sync with details:', {
+                        customerEmail: bookingDetails.customerEmail,
+                        timeRange: bookingDetails.timeRange,
+                        startTime: startTime,
+                        endTime: endTime,
+                        source: 'syncPaymentStatus'
+                      });
+                      
+                      await sendBookingConfirmationEmail(
+                        bookingDetails.customerEmail,
+                        bookingDetails.customerName,
+                        bookingDetails
+                      );
+                      logEmailOperation('send', bookingDetails.customerEmail, 'booking_confirmation', true);
+                      logger.info('Confirmation email sent to customer after sync:', bookingDetails.customerEmail);
+                    } catch (emailError) {
+                      logEmailOperation('send', bookingDetails.customerEmail, 'booking_confirmation', false, emailError);
+                      logger.error('Failed to send confirmation email to customer after sync:', emailError);
+                    }
+                  }
+
+                  // Send notification email to field owner
+                  if (field.owner && field.owner.email) {
+                    try {
+                      await sendOwnerBookingNotificationEmail(
+                        field.owner.email,
+                        field.owner.name,
+                        bookingDetails
+                      );
+                      logEmailOperation('send', field.owner.email, 'owner_notification', true);
+                      logger.info('Notification email sent to field owner after sync:', field.owner.email);
+                    } catch (emailError) {
+                      logEmailOperation('send', field.owner.email, 'owner_notification', false, emailError);
+                      logger.error('Failed to send notification email to field owner after sync:', emailError);
+                    }
+                  }
+                }
+              }
+            } catch (emailError) {
+              // Log email errors but don't fail the sync
+              logger.error('Error sending confirmation emails after sync (sync still succeeded):', emailError);
+            }
             
             // Get full booking details for the response (outside transaction)
             const updatedBooking = await Booking.findByPk(bookingId, {

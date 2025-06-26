@@ -78,7 +78,7 @@ SELECT id, name, field_type
               attributes: ['id', 'name', 'field_type']
             }
           ],
-          attributes: ['id', 'date', 'start_time', 'end_time', 'is_available']
+          attributes: ['id', 'date', 'start_time', 'end_time', 'status']
         },
         {
           model: User,
@@ -163,9 +163,8 @@ SELECT id, name, field_type
         ts.sub_field_id,
         ts.start_time,
         ts.end_time,
-        ts.is_available,
-        ts.booking_id,
         ts.status,
+        ts.booking_id,
         ts.maintenance_reason,
         ts.maintenance_until,
         sf.name as subfield_name,
@@ -183,7 +182,7 @@ SELECT id, name, field_type
       LEFT JOIN users u ON b.user_id = u.id
       WHERE sf.field_id = :fieldId 
         AND ts.date = :date
-        AND ts.is_available = false
+        AND ts.status != 'available'
         AND (b.status IS NULL OR b.status NOT IN ('cancelled'))
       ORDER BY ts.sub_field_id, ts.start_time
     `;
@@ -404,7 +403,7 @@ SELECT id, name, field_type
       // TimeSlot indexes
       'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_timeslots_date_subfield ON timeslots(date, sub_field_id)',
       'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_timeslots_booking_id ON timeslots(booking_id)',
-      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_timeslots_available ON timeslots(is_available) WHERE is_available = false',
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_timeslots_available ON timeslots(status) WHERE status != \'available\'',
       'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_timeslots_date_time ON timeslots(date, start_time, end_time)',
       
       // SubField indexes
@@ -414,7 +413,7 @@ SELECT id, name, field_type
       // Composite indexes for common queries
       'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_bookings_user_status ON bookings(user_id, status)',
       'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_bookings_date_status ON bookings(booking_date, status)',
-      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_timeslots_subfield_available ON timeslots(sub_field_id, is_available, date)'
+      'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_timeslots_subfield_available ON timeslots(sub_field_id, status, date)'
     ];
 
     const results = [];
@@ -635,7 +634,7 @@ SELECT id, name, field_type
         date: bookingDate,
         sub_field_id: timeSlot.sub_field_id,
         booking_id: booking.id,
-        is_available: false  // Lock the slot immediately
+        status: 'booked'  // Lock the slot immediately
       }));
       
       await TimeSlot.bulkCreate(timeSlotData, { 
@@ -751,7 +750,7 @@ SELECT id, name, field_type
           ts.start_time,
           ts.end_time,
           ts.booking_id,
-          ts.is_available,
+          ts.status,
           sf.name as subfield_name,
           b.status as booking_status,
           b.payment_status as payment_status
@@ -761,7 +760,7 @@ SELECT id, name, field_type
         WHERE sf.field_id = :fieldId 
           AND ts.date = :date
           AND ts.sub_field_id = :subFieldId
-          AND ts.is_available = false
+          AND ts.status != 'available'
           AND (
             -- Check for time overlap: slot conflicts if it starts before requested ends 
             -- and ends after requested starts
@@ -797,7 +796,7 @@ SELECT id, name, field_type
               startTime: conflictingSlots[0].start_time,
               endTime: conflictingSlots[0].end_time,
               bookingId: conflictingSlots[0].booking_id,
-              isAvailable: conflictingSlots[0].is_available,
+              isAvailable: conflictingSlots[0].status === 'available',
               bookingStatus: conflictingSlots[0].booking_status,
               paymentStatus: conflictingSlots[0].payment_status
             },
@@ -1005,7 +1004,7 @@ SELECT id, name, field_type
               attributes: ['id', 'name', 'field_type']
             }
           ],
-          attributes: ['id', 'date', 'start_time', 'end_time', 'is_available', 'sub_field_id']
+          attributes: ['id', 'date', 'start_time', 'end_time', 'status', 'sub_field_id']
         },
         {
           model: User,

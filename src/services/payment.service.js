@@ -570,6 +570,135 @@ class PaymentService {
 
     return statusMap[stripeStatus] || 'pending';
   }
+
+  /**
+   * Sync payment status for a booking
+   */
+  async syncPaymentStatus(bookingId) {
+    try {
+      logger.info(`Syncing payment status for booking: ${bookingId}`);
+
+      // Get booking with payment information
+      const booking = await Booking.findByPk(bookingId, {
+        include: [{
+          model: Payment,
+          attributes: ['id', 'stripe_payment_intent_id', 'stripe_checkout_session_id', 'status', 'amount']
+        }]
+      });
+
+      if (!booking) {
+        return {
+          success: false,
+          error: 'Booking not found'
+        };
+      }
+
+      const payment = booking.Payment;
+      if (!payment) {
+        return {
+          success: false,
+          error: 'Payment not found for booking'
+        };
+      }
+
+      let stripeStatus = null;
+      
+      // Check Stripe payment status
+      if (payment.stripe_checkout_session_id) {
+        // Retrieve checkout session status from Stripe
+        const session = await getStripe().checkout.sessions.retrieve(payment.stripe_checkout_session_id);
+        logger.info(`Retrieved checkout session from Stripe: ${session.id}, status: ${session.payment_status}`);
+        stripeStatus = session.payment_status === 'paid' ? 'succeeded' : session.payment_status;
+      } else if (payment.stripe_payment_intent_id) {
+        // Retrieve payment intent status from Stripe
+        const paymentIntent = await getStripe().paymentIntents.retrieve(payment.stripe_payment_intent_id);
+        stripeStatus = paymentIntent.status;
+      }
+
+      if (!stripeStatus) {
+        return {
+          success: false,
+          error: 'No Stripe payment information found'
+        };
+      }
+
+      const localStatus = this.mapStripeStatusToLocal(stripeStatus);
+
+      // Update payment status if it has changed
+      if (payment.status !== localStatus) {
+        await payment.update({ status: localStatus });
+      }
+
+      // Update booking status based on payment status
+      let newBookingStatus = booking.status;
+      if (localStatus === 'succeeded' && booking.status === 'pending') {
+        newBookingStatus = 'confirmed';
+        await booking.update({ 
+          status: 'confirmed',
+          payment_status: 'paid'
+        });
+        
+        logger.info(`Payment succeeded but booking status not updated, fixing...`);
+        
+        // Ensure timeslots are created/verified
+        const { TimeSlot } = require('../models');
+        const timeSlotsData = booking.time_slots || [];
+        
+        for (const slot of timeSlotsData) {
+          const [timeSlot, created] = await TimeSlot.findOrCreate({
+            where: {
+              sub_field_id: slot.sub_field_id,
+              booking_date: booking.booking_date,
+              start_time: slot.start_time,
+              end_time: slot.end_time,
+              booking_id: booking.id
+            },
+            defaults: {
+              sub_field_id: slot.sub_field_id,
+              booking_date: booking.booking_date,
+              start_time: slot.start_time,
+              end_time: slot.end_time,
+              booking_id: booking.id,
+              status: 'booked'
+            }
+          });
+
+          if (!created) {
+            await timeSlot.update({ 
+              status: 'booked',
+              booking_id: booking.id
+            });
+          }
+        }
+
+        logger.info(`Created/verified ${timeSlotsData.length} time slots for synced booking: ${booking.id}`);
+        logger.info(`Successfully synced booking ${bookingId} to confirmed status`);
+      }
+
+      // Refresh booking data
+      await booking.reload({
+        include: [{
+          model: Payment,
+          attributes: ['id', 'stripe_payment_intent_id', 'stripe_checkout_session_id', 'status', 'amount']
+        }]
+      });
+
+      return {
+        success: true,
+        booking: booking,
+        payment: booking.Payment,
+        previousStatus: booking.status,
+        newStatus: newBookingStatus
+      };
+
+    } catch (error) {
+      logger.error('Error syncing payment status:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
 }
 
 module.exports = new PaymentService();

@@ -175,7 +175,6 @@ const setMaintenanceStatus = async (params, io = null) => {
             start_time: startTime,
             end_time: endTime,
             status: 'maintenance',
-            is_available: false,
             maintenance_reason: reason,
             maintenance_until: estimatedCompletion,
             booking_id: null,
@@ -297,7 +296,6 @@ const revertMaintenanceStatus = async (slotIds, io = null) => {
     // Update slots
     const [updatedCount] = await TimeSlot.update({
       status: 'available',
-      is_available: true,
       maintenance_reason: null,
       maintenance_until: null,
       updated_at: new Date()
@@ -394,11 +392,9 @@ const toggleMaintenanceStatus = async (slotId, reason = null, estimatedCompletio
       }
       updateData.maintenance_reason = reason;
       updateData.maintenance_until = estimatedCompletion;
-      updateData.is_available = false;
     } else {
       updateData.maintenance_reason = null;
       updateData.maintenance_until = null;
-      updateData.is_available = true;
     }
     
     // Update the slot
@@ -471,7 +467,7 @@ const getTimeSlotById = async (slotId) => {
       startTime: slot.start_time,
       endTime: slot.end_time,
       status: slot.status,
-      isAvailable: slot.is_available,
+      isAvailable: slot.status === 'available',
       maintenanceReason: slot.maintenance_reason,
       maintenanceUntil: slot.maintenance_until,
       subField: slot.subfield ? {
@@ -502,11 +498,6 @@ const updateTimeSlot = async (slotId, updateData) => {
       throw new Error('Time slot not found');
     }
 
-    if (updateData.status === 'available' && updateData.is_available === undefined) {
-      updateData.is_available = true;
-    } else if (updateData.status === 'maintenance' && updateData.is_available === undefined) {
-      updateData.is_available = false;
-    }
     // Update the slot
     await TimeSlot.update({
       ...updateData,
