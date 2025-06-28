@@ -9,6 +9,12 @@ router.use(authMiddleware);
 // Set maintenance status for multiple time slots (batch operation)
 router.post('/timeslots/maintenance', maintenanceController.setMaintenance);
 
+// Check for existing maintenance duplicates before setting
+router.post('/timeslots/maintenance/check-duplicates', maintenanceController.checkMaintenanceDuplicates);
+
+// Set maintenance status for full day (all time slots)
+router.post('/timeslots/maintenance/full-day', maintenanceController.setFullDayMaintenance);
+
 // Remove maintenance status from time slots
 router.delete('/timeslots/maintenance', maintenanceController.removeMaintenance);
 
