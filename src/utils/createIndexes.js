@@ -62,7 +62,7 @@ async function createOptimalIndexes() {
             
             await sequelize.query(`
                 CREATE INDEX IF NOT EXISTS idx_timeslots_availability 
-                ON "${timeSlotTable}"(sub_field_id, date, start_time, is_available);
+                ON "${timeSlotTable}"(sub_field_id, date, start_time, status);
             `);
 
             await sequelize.query(`

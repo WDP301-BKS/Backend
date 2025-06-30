@@ -1,4 +1,4 @@
-const { DataTypes } = require('sequelize');
+const { DataTypes, Op } = require('sequelize');
 const { sequelize } = require('../config/db.config');
 
 const TimeSlot = sequelize.define('timeslot', {
@@ -25,14 +25,6 @@ const TimeSlot = sequelize.define('timeslot', {
   },  booking_id: {
     type: DataTypes.UUID
   },
-  is_available: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: true,
-    get() {
-      // Dynamically calculate is_available based on status for backward compatibility
-      return this.getDataValue('status') === 'available';
-    }
-  },
   status: {
     type: DataTypes.STRING(20),
     allowNull: false,
@@ -57,13 +49,13 @@ const TimeSlot = sequelize.define('timeslot', {
       unique: true,
       fields: ['sub_field_id', 'date', 'start_time', 'end_time'],
       where: {
-        is_available: false
+        status: { [Op.ne]: 'available' }
       },
       name: 'unique_booked_timeslot'
     },
     {
       // Performance index for availability queries
-      fields: ['sub_field_id', 'date', 'is_available'],
+      fields: ['sub_field_id', 'date', 'status'],
       name: 'timeslot_availability_index'
     }
   ]

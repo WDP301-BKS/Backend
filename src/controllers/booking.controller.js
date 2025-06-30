@@ -344,7 +344,7 @@ const cancelBooking = async (req, res) => {
         // Free up the time slots for re-booking but keep relationship for history
         await retryMechanism.executeDatabaseOperation(
             () => TimeSlot.update(
-                { is_available: true }, // Chỉ set available, giữ nguyên booking_id để lưu history
+                { status: 'available' }, // Chỉ set available, giữ nguyên booking_id để lưu history
                 { where: { booking_id: booking.id } }
             ),
             'timeslot_release'

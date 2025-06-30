@@ -233,6 +233,39 @@ const getReviewsByField = async (req, res) => {
   }
 };
 
+const getOwnerFieldsReviews = async (req, res) => {
+  const owner_id = req.user?.id;
+
+  try {
+    // Lấy tất cả reviews của các sân thuộc về owner
+    const reviews = await Review.findAll({
+      include: [
+        { 
+          model: Field, 
+          where: { owner_id },
+          attributes: ['id', 'name'] 
+        },
+        { 
+          model: User, 
+          attributes: ['id', 'name', 'profileImage'] 
+        },
+      ],
+      order: [['created_at', 'DESC']],
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Danh sách đánh giá của tất cả sân',
+      data: reviews,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Lỗi khi lấy danh sách đánh giá',
+      error: error.message,
+    });
+  }
+};
 
 const updateReview = async (req, res) => {
   try {

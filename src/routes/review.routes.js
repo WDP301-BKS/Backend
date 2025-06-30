@@ -12,7 +12,7 @@ const {
 router.post('/create', authMiddleware, createReview);
 
 // Lấy danh sách đánh giá theo sân
-router.get('/field/:field_id', getReviewsByField); 
+router.get('/field/:field_id', getReviewsByField);
 
 // Cập nhật đánh giá
 router.put('/update', authMiddleware, updateReview);

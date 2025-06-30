@@ -1,6 +1,8 @@
 const { Field, User, Location, SubField } = require('../models');
+const { Op } = require('sequelize');
 const { successResponse, errorResponse, forbiddenResponse } = require('../common/responses/apiResponse');
 const { USER_ROLES } = require('../common/constants');
+const excel = require('exceljs');
 
 class AdminController {
   // Lấy danh sách field chờ duyệt
@@ -224,6 +226,209 @@ class AdminController {
     } catch (error) {
       console.error('Error getting all fields for admin:', error);
       return errorResponse(res, 'Lỗi lấy danh sách sân', 500);
+    }
+  }
+
+  // Lấy danh sách tất cả user (cho admin)
+  async getAllUsers(req, res) {
+    try {
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const offset = (page - 1) * limit;
+
+      const { count, rows } = await User.findAndCountAll({
+        where: {
+          role: {
+            [Op.ne]: USER_ROLES.ADMIN // Loại trừ admin
+          }
+        },
+        attributes: [
+          'id',
+          'name',
+          'email', 
+          'phone',
+          'role',
+          'is_active',
+          'is_verified',
+          'created_at',
+          'updated_at',
+          'profileImage',
+          'address',
+          'gender',
+          'dateOfBirth',
+          'bio'
+        ],
+        limit,
+        offset,
+        order: [['created_at', 'DESC']]
+      });
+
+      const totalPages = Math.ceil(count / limit);
+
+      return successResponse(res, 'Lấy danh sách người dùng thành công', {
+        users: rows,
+        pagination: {
+          currentPage: page,
+          itemsPerPage: limit,
+          totalItems: count,
+          totalPages
+        }
+      });
+
+    } catch (error) {
+      console.error('Error getting all users:', error);
+      return errorResponse(res, 'Lỗi lấy danh sách người dùng', 500);
+    }
+  }
+
+  // Lấy chi tiết một user (cho admin)
+  async getUserDetails(req, res) {
+    try {
+      const { userId } = req.params;
+
+      const user = await User.findByPk(userId, {
+        attributes: [
+          'id',
+          'name',
+          'email',
+          'phone',
+          'role',
+          'is_active',
+          'is_verified',
+          'created_at',
+          'updated_at',
+          'profileImage',
+          'address',
+          'gender',
+          'dateOfBirth',
+          'bio'
+        ]
+      });
+
+      if (!user) {
+        return errorResponse(res, 'Không tìm thấy người dùng', 404);
+      }
+
+      return successResponse(res, 'Lấy thông tin người dùng thành công', user);
+
+    } catch (error) {
+      console.error('Error getting user details:', error);
+      return errorResponse(res, 'Lỗi lấy thông tin người dùng', 500);
+    }
+  }
+
+  // Cập nhật trạng thái hoạt động của user (cho admin)
+  async updateUserStatus(req, res) {
+    try {
+      const { userId } = req.params;
+      const { is_active } = req.body;
+
+      if (typeof is_active !== 'boolean') {
+        return errorResponse(res, 'Trạng thái hoạt động không hợp lệ', 400);
+      }
+
+      const user = await User.findByPk(userId);
+
+      if (!user) {
+        return errorResponse(res, 'Không tìm thấy người dùng', 404);
+      }
+
+      // Không cho phép thay đổi trạng thái của admin
+      if (user.role === USER_ROLES.ADMIN) {
+        return errorResponse(res, 'Không thể thay đổi trạng thái của admin', 403);
+      }
+
+      await user.update({ is_active });
+
+      return successResponse(res, 'Cập nhật trạng thái người dùng thành công', {
+        userId,
+        is_active
+      });
+
+    } catch (error) {
+      console.error('Error updating user status:', error);
+      return errorResponse(res, 'Lỗi cập nhật trạng thái người dùng', 500);
+    }
+  }
+
+  // Xuất danh sách user ra file Excel
+  async exportUsersToExcel(req, res) {
+    try {
+      // Lấy tất cả user không phân trang
+      const users = await User.findAll({
+        attributes: [
+          'id',
+          'name',
+          'email', 
+          'phone',
+          'role',
+          'is_active',
+          'is_verified',
+          'created_at',
+          'address',
+          'gender',
+          'dateOfBirth'
+        ],
+        order: [['created_at', 'DESC']]
+      });
+
+      // Chuẩn bị dữ liệu cho Excel
+      const workbook = new excel.Workbook();
+      const worksheet = workbook.addWorksheet('Users');
+
+      // Định nghĩa cột
+      worksheet.columns = [
+        { header: 'ID', key: 'id', width: 30 },
+        { header: 'Họ tên', key: 'name', width: 30 },
+        { header: 'Email', key: 'email', width: 30 },
+        { header: 'Số điện thoại', key: 'phone', width: 20 },
+        { header: 'Vai trò', key: 'role', width: 15 },
+        { header: 'Trạng thái', key: 'is_active', width: 15 },
+        { header: 'Đã xác thực', key: 'is_verified', width: 15 },
+        { header: 'Ngày tham gia', key: 'created_at', width: 20 },
+        { header: 'Địa chỉ', key: 'address', width: 40 },
+        { header: 'Giới tính', key: 'gender', width: 15 },
+        { header: 'Ngày sinh', key: 'dateOfBirth', width: 20 }
+      ];
+
+      // Style cho header
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
+
+      // Thêm dữ liệu và format
+      users.forEach(user => {
+        worksheet.addRow({
+          ...user.toJSON(),
+          role: user.role === 'customer' ? 'Người dùng' : user.role === 'owner' ? 'Chủ sân' : 'Quản trị viên',
+          is_active: user.is_active ? 'Hoạt động' : 'Bị khóa',
+          is_verified: user.is_verified ? 'Đã xác thực' : 'Chưa xác thực',
+          created_at: new Date(user.created_at).toLocaleDateString('vi-VN'),
+          dateOfBirth: user.dateOfBirth ? new Date(user.dateOfBirth).toLocaleDateString('vi-VN') : ''
+        });
+      });
+
+      // Auto fit columns
+      worksheet.columns.forEach(column => {
+        column.alignment = { vertical: 'middle', horizontal: 'left' };
+      });
+
+      // Set response headers
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      );
+      res.setHeader(
+        'Content-Disposition',
+        'attachment; filename=users.xlsx'
+      );
+
+      // Gửi file về client
+      await workbook.xlsx.write(res);
+      res.end();
+
+    } catch (error) {
+      console.error('Error exporting users to Excel:', error);
+      return errorResponse(res, 'Lỗi khi xuất dữ liệu', 500);
     }
   }
 }

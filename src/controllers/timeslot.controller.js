@@ -114,15 +114,14 @@ const getTimeSlotById = async (req, res) => {
 const updateTimeSlotStatus = async (req, res) => {
   try {
     const { slotId } = req.params;
-    const { status, is_available } = req.body;
+    const { status } = req.body;
 
-    if (!status && is_available === undefined) {
-      return res.status(400).json(responseFormatter.error('Vui lòng cung cấp trạng thái hoặc is_available', 400));
+    if (!status) {
+      return res.status(400).json(responseFormatter.error('Vui lòng cung cấp trạng thái', 400));
     }
 
     const updatedSlot = await timeSlotService.updateTimeSlot(slotId, {
-      ...(status && { status }),
-      ...(is_available !== undefined && { is_available })
+      status
     });
 
     return res.json(responseFormatter.success(updatedSlot, 'Cập nhật trạng thái khung giờ thành công'));

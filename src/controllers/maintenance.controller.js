@@ -399,6 +399,111 @@ const removeMaintenanceByFieldTime = async (req, res) => {
   }
 };
 
+/**
+ * Set maintenance status for full day (all available time slots)
+ */
+const setFullDayMaintenance = async (req, res) => {
+  try {
+    const {
+      subFieldIds,
+      date,
+      reason,
+      estimatedCompletion,
+    } = req.body;
+
+    // Validation
+    if (
+      !subFieldIds ||
+      !Array.isArray(subFieldIds) ||
+      subFieldIds.length === 0
+    ) {
+      return res
+        .status(400)
+        .json(responseFormatter.error("Vui lòng chọn ít nhất một sân", 400));
+    }
+
+    if (!date) {
+      return res
+        .status(400)
+        .json(
+          responseFormatter.error("Vui lòng chọn ngày bảo trì", 400)
+        );
+    }
+
+    if (!reason || reason.trim().length === 0) {
+      return res
+        .status(400)
+        .json(responseFormatter.error("Vui lòng nhập lý do bảo trì", 400));
+    }
+
+    // Call service to set maintenance for full day
+    const result = await timeslotService.setFullDayMaintenanceStatus(
+      {
+        subFieldIds,
+        date,
+        reason: reason.trim(),
+        estimatedCompletion,
+      },
+      getSocketInstance()
+    );
+
+    return res.json(
+      responseFormatter.success(
+        result,
+        "Đã đặt bảo trì cả ngày thành công"
+      )
+    );
+  } catch (error) {
+    console.error("Error setting full day maintenance:", error);
+    return res
+      .status(500)
+      .json(responseFormatter.error(error.message || "Lỗi cập nhật trạng thái bảo trì", 500));
+  }
+};
+
+/**
+ * Check for existing maintenance slots before setting maintenance
+ */
+const checkMaintenanceDuplicates = async (req, res) => {
+  try {
+    const {
+      subFieldIds,
+      date,
+      startTime,
+      endTime,
+    } = req.body;
+
+    // Validation
+    if (!subFieldIds || !Array.isArray(subFieldIds) || subFieldIds.length === 0) {
+      return res.status(400).json(
+        responseFormatter.error("Vui lòng chọn ít nhất một sân", 400)
+      );
+    }
+
+    if (!date || !startTime || !endTime) {
+      return res.status(400).json(
+        responseFormatter.error("Vui lòng nhập đầy đủ thông tin thời gian", 400)
+      );
+    }
+
+    const duplicateCheck = await timeslotService.checkExistingMaintenance(
+      subFieldIds,
+      date,
+      startTime,
+      endTime
+    );
+
+    return res.status(200).json(
+      responseFormatter.success(duplicateCheck, "Kiểm tra trùng lặp bảo trì thành công")
+    );
+  } catch (error) {
+    console.error("Error checking maintenance duplicates:", error);
+    return res.status(500).json(
+      responseFormatter.error("Lỗi kiểm tra trùng lặp bảo trì: " + error.message, 500)
+    );
+  }
+};
+
 module.exports = {
   setMaintenance,
   removeMaintenance,
@@ -406,4 +511,6 @@ module.exports = {
   toggleMaintenance,
   getMaintenanceHistory,
   removeMaintenanceByFieldTime,
+  setFullDayMaintenance,
+  checkMaintenanceDuplicates,
 };

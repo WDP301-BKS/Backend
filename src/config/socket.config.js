@@ -803,7 +803,7 @@ const setupFieldEvents = (socket) => {
         socket.emit('field_availability_update', {
           fieldId,
           date,
-          isAvailable: field.is_available,
+          isAvailable: field.status === 'available',
           timestamp: new Date()
         });
       }
@@ -893,14 +893,14 @@ const setupFieldEvents = (socket) => {
 
       // Emit updated availability status to field room
       emitFieldAvailabilityUpdate(fieldId, date, {
-        isAvailable: field.is_available,
+        isAvailable: field.status === 'available',
         timestamp: new Date()
       });
 
       socket.emit('field_sync_complete', {
         fieldId,
         date,
-        isAvailable: field.is_available,
+        isAvailable: field.status === 'available',
         timestamp: new Date()
       });
 
