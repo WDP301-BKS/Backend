@@ -12,6 +12,7 @@ const timeSlotRoutes = require('./timeslot.routes');
 const fieldPricingRuleRoutes = require('./field_pricing_rule.routes');
 const maintenanceRoutes = require('./maintenance.routes');
 
+
 const adminRoutes = require('./admin.routes');
 
 const router = express.Router();

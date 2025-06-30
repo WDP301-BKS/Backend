@@ -1,19 +1,50 @@
 const { Review, Field, User, Booking, TimeSlot, SubField } = require('../models');
 const { v4: uuidv4 } = require('uuid');
+const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
+const streamifier = require('streamifier');
+const axios = require('axios');
+const { moderateContent } = require('../services/gemini.service');
+require('dotenv').config();
+
+
+// Middleware multer nhận tối đa 3 ảnh
+const upload = multer({
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+});
+
+// Hàm upload buffer lên Cloudinary
+const uploadToCloudinary = (fileBuffer) => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream({ folder: 'review-images' }, (err, result) => {
+      if (err) reject(err);
+      else resolve(result.secure_url);
+    });
+    streamifier.createReadStream(fileBuffer).pipe(stream);
+  });
+};
 
 const createReview = async (req, res) => {
   try {
-    const { field_id, rating, comment } = req.body;
+    await new Promise((resolve, reject) => upload.array('images', 3)(req, res, (err) => err ? reject(err) : resolve()));
+    const { rating, comment } = req.body;
     const user_id = req.user?.id;
+    const field_id = req.body.field_id;
 
-    // Bước 1: Kiểm tra dữ liệu đầu vào
+    // Kiểm duyệt comment bằng Gemini service
+    if (comment) {
+      const isSafe = await moderateContent(comment);
+      if (!isSafe) {
+        return res.status(400).json({ success: false, message: 'Nội dung đánh giá chứa từ ngữ không phù hợp.' });
+      }
+    }
+
     if (!user_id) {
       return res.status(401).json({
         success: false,
         message: 'Bạn cần đăng nhập để gửi đánh giá.',
       });
     }
-
     if (!field_id || !rating || rating < 1 || rating > 5) {
       return res.status(400).json({
         success: false,
@@ -21,22 +52,56 @@ const createReview = async (req, res) => {
       });
     }
 
-    // Bước 2: Kiểm tra xem người dùng đã đánh giá sân này chưa
-    const existingReview = await Review.findOne({
+    // Kiểm tra user có ít nhất 1 booking completed cho field này
+    const completedBooking = await Booking.findOne({
       where: {
         user_id,
-        field_id
-      }
+        status: 'completed',
+      },
     });
-
-    if (existingReview) {
-      return res.status(400).json({
+    let hasCompleted = false;
+    let booking_id = null;
+    if (completedBooking && completedBooking.booking_metadata?.fieldId == field_id) {
+      hasCompleted = true;
+      booking_id = completedBooking.id;
+    } else if (completedBooking) {
+      // Nếu có nhiều booking, kiểm tra từng cái
+      const bookings = await Booking.findAll({
+        where: {
+          user_id,
+          status: 'completed',
+        },
+      });
+      for (const b of bookings) {
+        if (b.booking_metadata?.fieldId == field_id) {
+          hasCompleted = true;
+          booking_id = b.id;
+          break;
+        }
+      }
+    }
+    if (!hasCompleted) {
+      return res.status(403).json({
         success: false,
-        message: 'Bạn đã đánh giá sân này rồi. Mỗi người chỉ được đánh giá một lần cho mỗi sân.',
+        message: 'Chỉ được review khi đã có ít nhất 1 booking hoàn thành cho sân này.',
       });
     }
 
-    // Bước 3: Kiểm tra xem sân có tồn tại không
+    // Kiểm tra đã review field này chưa (1 lần cho mỗi user/field)
+    const existingReview = await Review.findOne({
+      where: {
+        user_id,
+        field_id,
+      },
+    });
+    if (existingReview) {
+      return res.status(400).json({
+        success: false,
+        message: 'Bạn chỉ được review 1 lần cho mỗi sân đã hoàn thành.',
+      });
+    }
+
+    // Kiểm tra sân tồn tại
     const field = await Field.findByPk(field_id);
     if (!field) {
       return res.status(404).json({
@@ -45,39 +110,28 @@ const createReview = async (req, res) => {
       });
     }
 
-    // Bước 4: Kiểm tra xem người dùng có booking "completed" cho sân này không
-    const completedBooking = await Booking.findOne({
-      include: [{
-        model: TimeSlot,
-        include: [{
-          model: SubField,
-          where: { field_id }
-        }]
-      }],
-      where: {
-        user_id,
-        status: 'completed'
+    // Xử lý upload ảnh nếu có
+    let imageUrls = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const url = await uploadToCloudinary(file.buffer);
+        imageUrls.push(url);
       }
-    });
-
-    if (!completedBooking) {
-      return res.status(403).json({
-        success: false,
-        message: 'Bạn cần có ít nhất một booking đã hoàn thành để đánh giá sân này.',
-      });
     }
 
-    // Bước 5: Tạo đánh giá mới
+    // Tạo review
     const review = await Review.create({
       id: uuidv4(),
       user_id,
       field_id,
+      booking_id, // optional, for traceability
       rating,
       comment: comment || null,
+      images: imageUrls,
       created_at: new Date(),
     });
 
-    // Bước 6: Lấy thông tin đánh giá kèm user và field
+    // Lấy thông tin review kèm user và field
     const reviewWithDetails = await Review.findOne({
       where: { id: review.id },
       include: [
@@ -112,6 +166,13 @@ const getReviewsByField = async (req, res) => {
         { model: Field, attributes: ['id', 'name'] },
       ],
       order: [['created_at', 'DESC']],
+    });
+
+    // Đảm bảo images luôn là array string (nếu không có thì trả về mảng rỗng)
+    const reviewsWithImages = reviews.map(r => {
+      let images = r.images;
+      if (!Array.isArray(images)) images = [];
+      return { ...r.toJSON(), images };
     });
 
     // Kiểm tra xem người dùng đã đánh giá sân này chưa
@@ -157,7 +218,7 @@ const getReviewsByField = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: 'Danh sách đánh giá',
-      data: reviews,
+      data: reviewsWithImages,
       canReview,
       hasReviewed,
     });
@@ -173,8 +234,145 @@ const getReviewsByField = async (req, res) => {
 };
 
 
+const updateReview = async (req, res) => {
+  try {
+    await new Promise((resolve, reject) => upload.array('images', 3)(req, res, (err) => err ? reject(err) : resolve()));
+    const { field_id, rating, comment } = req.body;
+    const user_id = req.user?.id;
+    // Kiểm duyệt comment bằng Gemini service
+    if (comment) {
+      const isSafe = await moderateContent(comment);
+      if (!isSafe) {
+        return res.status(400).json({ success: false, message: 'Nội dung đánh giá chứa từ ngữ không phù hợp.' });
+      }
+    }
+    if (!user_id) {
+      return res.status(401).json({ success: false, message: 'Bạn cần đăng nhập.' });
+    }
+    if (!field_id || !rating || rating < 1 || rating > 5) {
+      return res.status(400).json({ success: false, message: 'Thiếu thông tin hoặc rating không hợp lệ.' });
+    }
+    // Tìm review theo user_id và field_id
+    const review = await Review.findOne({ where: { user_id, field_id } });
+    if (!review) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy review để cập nhật.' });
+    }
+    // Xử lý ảnh: chỉ giữ ảnh mới upload (frontend đã gửi lại file cũ dưới dạng file upload nếu muốn giữ)
+    let imageUrls = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const url = await uploadToCloudinary(file.buffer);
+        imageUrls.push(url);
+      }
+    }
+    await review.update({
+      rating,
+      comment: comment || null,
+      images: imageUrls,
+    });
+    // Lấy lại review kèm user và field
+    const reviewWithDetails = await Review.findOne({
+      where: { id: review.id },
+      include: [
+        { model: User, attributes: ['id', 'name', 'profileImage'] },
+        { model: Field, attributes: ['id', 'name'] },
+      ],
+    });
+    return res.status(200).json({
+      success: true,
+      message: 'Cập nhật đánh giá thành công.',
+      data: reviewWithDetails,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Lỗi khi cập nhật đánh giá.',
+      error: error.message,
+    });
+  }
+};
+
+// Tạo hoặc cập nhật review cho sân từ booking (dựa vào fieldId của booking)
+const upsertReviewByBooking = async (req, res) => {
+  try {
+    await new Promise((resolve, reject) => upload.array('images', 3)(req, res, (err) => err ? reject(err) : resolve()));
+    const { rating, comment, booking_id } = req.body;
+    const user_id = req.user?.id;
+    // Lấy booking để lấy fieldId
+    const booking = await Booking.findOne({ where: { id: booking_id, user_id } });
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy booking.' });
+    }
+    const field_id = booking.booking_metadata?.fieldId || booking.field_id;
+    if (!field_id) {
+      return res.status(400).json({ success: false, message: 'Booking không có fieldId.' });
+    }
+    // Kiểm duyệt comment bằng Gemini service
+    if (comment) {
+      const isSafe = await moderateContent(comment);
+      if (!isSafe) {
+        return res.status(400).json({ success: false, message: 'Nội dung đánh giá chứa từ ngữ không phù hợp.' });
+      }
+    }
+    if (!user_id) {
+      return res.status(401).json({ success: false, message: 'Bạn cần đăng nhập.' });
+    }
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({ success: false, message: 'Rating không hợp lệ.' });
+    }
+    // Kiểm tra đã có review chưa
+    let review = await Review.findOne({ where: { user_id, field_id } });
+    // Xử lý upload ảnh nếu có
+    let imageUrls = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        const url = await uploadToCloudinary(file.buffer);
+        imageUrls.push(url);
+      }
+    }
+    if (review) {
+      // Nếu không upload ảnh mới, giữ nguyên ảnh cũ
+      if (imageUrls.length === 0) {
+        imageUrls = review.images || [];
+      }
+      await review.update({ rating, comment: comment || null, images: imageUrls });
+      const reviewWithDetails = await Review.findOne({
+        where: { id: review.id },
+        include: [
+          { model: User, attributes: ['id', 'name', 'profileImage'] },
+          { model: Field, attributes: ['id', 'name'] },
+        ],
+      });
+      return res.status(200).json({ success: true, message: 'Cập nhật đánh giá thành công.', data: reviewWithDetails });
+    } else {
+      // Tạo review mới
+      const newReview = await Review.create({
+        id: uuidv4(),
+        user_id,
+        field_id,
+        booking_id,
+        rating,
+        comment: comment || null,
+        images: imageUrls,
+        created_at: new Date(),
+      });
+      const reviewWithDetails = await Review.findOne({
+        where: { id: newReview.id },
+        include: [
+          { model: User, attributes: ['id', 'name', 'profileImage'] },
+          { model: Field, attributes: ['id', 'name'] },
+        ],
+      });
+      return res.status(201).json({ success: true, message: 'Đã tạo đánh giá thành công.', data: reviewWithDetails });
+    }
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Lỗi khi tạo/cập nhật đánh giá.', error: error.message });
+  }
+};
+
 module.exports = { 
   createReview, 
   getReviewsByField, 
-
+  updateReview,
+  upsertReviewByBooking,
 };

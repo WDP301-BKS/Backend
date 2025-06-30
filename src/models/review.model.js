@@ -25,6 +25,11 @@ const Review = sequelize.define('review', {
   },
   comment: {
     type: DataTypes.TEXT
+  },
+  images: {
+    type: DataTypes.JSON,
+    allowNull: true,
+    defaultValue: []
   }
 }, {
   timestamps: true,
@@ -32,4 +37,4 @@ const Review = sequelize.define('review', {
   updatedAt: false
 });
 
-module.exports = Review; 
+module.exports = Review;

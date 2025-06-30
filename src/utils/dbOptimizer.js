@@ -1057,6 +1057,7 @@ SELECT id, name, field_type
       const result = {
         id: booking.id,
         booking_date: booking.booking_date,
+        fieldId: field?.id || booking.booking_metadata?.fieldId || fallbackFieldInfo?.fieldId || null, // Always include fieldId at top-level
         fieldName: field?.name || fallbackFieldInfo?.fieldName || 'Sân không xác định',
         fieldType: subField?.field_type || fallbackFieldInfo?.fieldType || 'Không xác định',
         fieldNumber: subField?.name || fallbackFieldInfo?.fieldNumber || 'N/A',
