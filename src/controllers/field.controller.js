@@ -3,6 +3,8 @@ const { ValidationError, Op, Sequelize } = require('sequelize');
 const responseFormatter = require('../utils/responseFormatter');
 const sequelize = require('sequelize');
 const { uploadImage } = require('../config/cloudinaryConfig');
+const geocodingService = require('../services/geocoding.enhanced');
+const logger = require('../utils/logger');
 
 // Get all fields without pagination
 const getAllFields = async (req, res) => {
@@ -352,19 +354,68 @@ const addFieldWithFiles = async (req, res) => {
                     details: process.env.NODE_ENV === 'development' ? uploadError.message : undefined
                 }));
             }
-        }        // Create location entry first
-        const locationData = await Location.create({
-            address_text: address,
-            city: city || 'Đà Nẵng',
-            district: district || location, // Use district if provided, fallback to location
-            ward: ward || 'Thuận Thành'
+        }        // Create or get location with geocoding
+        let locationRecord;
+        
+        // Try to find existing location with same address
+        const fullAddress = `${address}, ${district}, ${city}`;
+        const existingLocation = await Location.findOne({
+            where: {
+                address_text: address,
+                city: city,
+                district: district,
+                ward: ward || null
+            }
         });
+
+        if (existingLocation) {
+            locationRecord = existingLocation;
+            console.log('Using existing location:', locationRecord.id);
+        } else {
+            // Create new location with geocoding
+            try {
+                console.log('Geocoding address:', fullAddress);
+                const geocodeResult = await geocodingService.geocodeAddress(fullAddress);
+                
+                locationRecord = await Location.create({
+                    address_text: address,
+                    formatted_address: geocodeResult.formattedAddress,
+                    city: city,
+                    district: district,
+                    ward: ward,
+                    latitude: geocodeResult.latitude,
+                    longitude: geocodeResult.longitude,
+                    country: geocodeResult.country,
+                    country_code: geocodeResult.countryCode
+                });
+                
+                console.log('Created new location with coordinates:', {
+                    id: locationRecord.id,
+                    lat: geocodeResult.latitude,
+                    lon: geocodeResult.longitude
+                });
+            } catch (geocodeError) {
+                console.log('Geocoding failed, creating location without coordinates:', geocodeError.message);
+                
+                // Create location without coordinates if geocoding fails
+                locationRecord = await Location.create({
+                    address_text: address,
+                    city: city,
+                    district: district,
+                    ward: ward,
+                    latitude: null,
+                    longitude: null
+                });
+                
+                console.log('Created location without coordinates:', locationRecord.id);
+            }
+        }
 
         // Create field
         const field = await Field.create({
             owner_id,
             name,
-            location_id: locationData.id,
+            location_id: locationRecord.id,
             description,
             price_per_hour,
             images1,
@@ -1219,13 +1270,513 @@ const getFieldForEdit = async (req, res) => {
     }
 };
 
+// Search fields by location within radius (8km default)
+const searchFieldsByLocation = async (req, res) => {
+    try {
+        const { 
+            address, 
+            latitude, 
+            longitude, 
+            radius = 8, 
+            page = 1, 
+            limit = 10 
+        } = req.query;
+
+        let searchLat, searchLon;
+
+        // If address is provided, geocode it first
+        if (address) {
+            try {
+                const geocodeResult = await geocodingService.geocodeAddress(address);
+                searchLat = geocodeResult.latitude;
+                searchLon = geocodeResult.longitude;
+                
+                logger.info(`Geocoded address "${address}" to coordinates: ${searchLat}, ${searchLon}`);
+            } catch (geocodeError) {
+                logger.error('Geocoding error:', geocodeError);
+                return res.status(400).json(responseFormatter.error(
+                    'Không thể xác định tọa độ từ địa chỉ đã cung cấp',
+                    400
+                ));
+            }
+        } else if (latitude && longitude) {
+            // Use provided coordinates
+            searchLat = parseFloat(latitude);
+            searchLon = parseFloat(longitude);
+            
+            // Validate coordinates
+            if (!geocodingService.validateCoordinates(searchLat, searchLon)) {
+                return res.status(400).json(responseFormatter.error(
+                    'Tọa độ không hợp lệ',
+                    400
+                ));
+            }
+        } else {
+            return res.status(400).json(responseFormatter.error(
+                'Vui lòng cung cấp địa chỉ hoặc tọa độ để tìm kiếm',
+                400
+            ));
+        }
+
+        const radiusKm = parseFloat(radius);
+        const pageNumber = parseInt(page);
+        const limitNumber = parseInt(limit);
+        const offset = (pageNumber - 1) * limitNumber;
+
+        // Get bounds for optimized database query
+        const bounds = geocodingService.getBounds(searchLat, searchLon, radiusKm);
+
+        // First, get all fields within the bounding box (for performance)
+        const fieldsInBounds = await Field.findAll({
+            where: {
+                is_verified: true
+            },
+            include: [
+                {
+                    model: Location,
+                    as: 'location',
+                    where: {
+                        latitude: {
+                            [Op.between]: [bounds.minLat, bounds.maxLat]
+                        },
+                        longitude: {
+                            [Op.between]: [bounds.minLon, bounds.maxLon]
+                        },
+                        latitude: { [Op.not]: null },
+                        longitude: { [Op.not]: null }
+                    },
+                    attributes: [
+                        'id', 'latitude', 'longitude', 'address_text', 
+                        'formatted_address', 'city', 'district', 'ward'
+                    ]
+                },
+                {
+                    model: User,
+                    as: 'owner',
+                    attributes: ['id', 'name', 'phone']
+                },
+                {
+                    model: SubField,
+                    as: 'subfields',
+                    attributes: ['id', 'name', 'field_type']
+                }
+            ],
+            attributes: [
+                'id', 'name', 'description', 'price_per_hour', 
+                'images1', 'images2', 'images3', 'is_verified', 
+                'created_at'
+            ]
+        });
+
+        // Calculate exact distances and filter by radius
+        const fieldsWithDistance = geocodingService.findLocationsWithinRadius(
+            searchLat, 
+            searchLon, 
+            fieldsInBounds.map(field => ({
+                ...field.toJSON(),
+                latitude: field.location.latitude,
+                longitude: field.location.longitude
+            })), 
+            radiusKm
+        );
+
+        // Apply pagination
+        const totalResults = fieldsWithDistance.length;
+        const paginatedFields = fieldsWithDistance.slice(offset, offset + limitNumber);
+
+        return res.json(responseFormatter.success({
+            fields: paginatedFields,
+            search_info: {                search_coordinates: {
+                    latitude: searchLat,
+                    longitude: searchLon
+                },
+                radius_km: radiusKm,
+                total_found: totalResults
+            },
+            pagination: {
+                total: totalResults,
+                page: pageNumber,
+                limit: limitNumber,
+                total_pages: Math.ceil(totalResults / limitNumber)
+            }
+        }));
+        
+    } catch (error) {
+        logger.error('Error in searchFieldsByLocation:', error);
+        return res.status(500).json(responseFormatter.error(
+            'Đã có lỗi xảy ra khi tìm kiếm sân bóng theo vị trí',
+            500,
+            process.env.NODE_ENV === 'development' ? error.message : undefined
+        ));
+    }
+};
+
+// Geocode an address and return coordinates
+const geocodeAddress = async (req, res) => {
+    try {
+        console.log('=== geocodeAddress API DEBUG ===');
+        console.log('Request method:', req.method);
+        console.log('Content-Type:', req.get('Content-Type'));
+        console.log('Request body:', req.body);
+        console.log('Body type:', typeof req.body);
+        console.log('Body keys:', Object.keys(req.body || {}));
+        
+        // Extract address with multiple fallbacks
+        let address = null;
+        
+        if (req.body && typeof req.body === 'object') {
+            address = req.body.address;
+        } else if (typeof req.body === 'string') {
+            // Handle case where body is sent as string
+            try {
+                const parsedBody = JSON.parse(req.body);
+                address = parsedBody.address;
+            } catch (parseError) {
+                console.log('Failed to parse body as JSON:', parseError.message);
+            }
+        }
+        
+        console.log('Extracted address:', address);
+        console.log('Address type:', typeof address);
+
+        // Comprehensive input validation
+        if (!address) {
+            console.log('❌ Address validation failed - no address provided');
+            return res.status(400).json(responseFormatter.error(
+                'Vui lòng cung cấp địa chỉ trong trường "address"',
+                400,
+                {
+                    received_body: req.body,
+                    expected_format: { address: "string" },
+                    field_missing: "address"
+                }
+            ));
+        }
+
+        if (typeof address !== 'string') {
+            console.log('❌ Address validation failed - not a string');
+            return res.status(400).json(responseFormatter.error(
+                'Địa chỉ phải là chuỗi văn bản',
+                400,
+                {
+                    received_type: typeof address,
+                    expected_type: "string"
+                }
+            ));
+        }
+
+        const trimmedAddress = address.trim();
+        if (trimmedAddress.length === 0) {
+            console.log('❌ Address validation failed - empty string');
+            return res.status(400).json(responseFormatter.error(
+                'Địa chỉ không được để trống',
+                400,
+                { received_address: address }
+            ));
+        }
+
+        if (trimmedAddress.length > 500) {
+            console.log('❌ Address validation failed - too long');
+            return res.status(400).json(responseFormatter.error(
+                'Địa chỉ quá dài (tối đa 500 ký tự)',
+                400,
+                { 
+                    address_length: trimmedAddress.length,
+                    max_length: 500
+                }
+            ));
+        }
+
+        console.log('✅ Address validation passed');
+        console.log(`📍 Calling geocoding service with: "${trimmedAddress}"`);
+        
+        const startTime = Date.now();
+        const result = await geocodingService.geocodeAddress(trimmedAddress);
+        const endTime = Date.now();
+        const processingTime = endTime - startTime;
+        
+        console.log('✅ Geocoding successful');
+        console.log(`⏱️ Processing time: ${processingTime}ms`);        console.log('📊 Result:', {
+            coordinates: { latitude: result.latitude, longitude: result.longitude },
+            address_info: {
+                formatted_address: result.formattedAddress,
+                city: result.city,
+                district: result.district,
+                ward: result.ward
+            }
+        });
+        
+        return res.json(responseFormatter.success({
+            coordinates: {
+                latitude: result.latitude,
+                longitude: result.longitude
+            },
+            address_info: {
+                formatted_address: result.formattedAddress,
+                city: result.city,
+                district: result.district,
+                ward: result.ward,
+                country: result.country
+            },
+            metadata: {
+                source: result.provider || 'unknown',
+                accuracy_level: result.detailLevel || 'unknown',
+                fallback_used: result.fallbackUsed || false,
+                processing_time_ms: processingTime
+            }
+        }));
+        
+    } catch (error) {
+        console.error('❌ Error in geocodeAddress API:', error);
+        logger.error('Error in geocodeAddress:', error);
+        
+        // Categorize errors and provide appropriate responses
+        if (error.message.includes('INVALID_INPUT') || 
+            error.message.includes('EMPTY_ADDRESS') || 
+            error.message.includes('ADDRESS_TOO_LONG')) {
+            
+            return res.status(400).json(responseFormatter.error(
+                'Dữ liệu đầu vào không hợp lệ',
+                400,
+                {
+                    error_type: 'validation_error',
+                    details: error.message,
+                    received_address: req.body?.address
+                }
+            ));
+        }
+        
+        if (error.message.includes('TIMEOUT')) {
+            return res.status(408).json(responseFormatter.error(
+                'Dịch vụ geocoding mất quá nhiều thời gian phản hồi',
+                408,
+                {
+                    error_type: 'timeout_error',
+                    details: error.message,
+                    suggestion: 'Vui lòng thử lại sau ít phút'
+                }
+            ));
+        }
+        
+        if (error.message.includes('GEOCODING_FAILED')) {
+            return res.status(404).json(responseFormatter.error(
+                'Không thể xác định tọa độ từ địa chỉ đã cung cấp',
+                404,
+                {
+                    error_type: 'geocoding_failed',
+                    details: error.message,
+                    address: req.body?.address,
+                    suggestion: 'Vui lòng kiểm tra lại địa chỉ hoặc thử với địa chỉ đơn giản hơn'
+                }
+            ));
+        }
+        
+        // Unknown error
+        return res.status(500).json(responseFormatter.error(
+            'Đã có lỗi xảy ra trong quá trình xử lý geocoding',
+            500,
+            process.env.NODE_ENV === 'development' ? {
+                error_type: 'unknown_error',
+                details: error.message,
+                stack: error.stack
+            } : {
+                error_type: 'internal_error',
+                message: 'Vui lòng thử lại sau'
+            }
+        ));
+    }
+};
+
+// Reverse geocode từ tọa độ sang địa chỉ
+const reverseGeocodeAddress = async (req, res) => {
+    try {
+        const { latitude, longitude } = req.body;
+        
+        if (!latitude || !longitude) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'MISSING_COORDINATES',
+                    message: 'Thiếu thông tin tọa độ (latitude, longitude)'
+                }
+            });
+        }
+        
+        // Kiểm tra tọa độ hợp lệ
+        if (isNaN(parseFloat(latitude)) || isNaN(parseFloat(longitude))) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'INVALID_COORDINATES',
+                    message: 'Tọa độ không hợp lệ'
+                }
+            });
+        }
+          // Gọi service reverse geocoding
+        const result = await geocodingService.reverseGeocode(
+            parseFloat(latitude), 
+            parseFloat(longitude)
+        );
+        
+        if (!result) {
+            return res.status(404).json({
+                success: false,
+                error: {
+                    code: 'ADDRESS_NOT_FOUND',
+                    message: 'Không thể tìm thấy địa chỉ từ tọa độ này'
+                }
+            });
+        }
+        
+        return res.json({
+            success: true,
+            data: {
+                address: result.address || result.formattedAddress,
+                formatted_address: result.formattedAddress,
+                street_address: result.streetNumber ? 
+                    `${result.streetNumber} ${result.streetName}`.trim() : 
+                    result.streetName || '',
+                city: result.city,
+                district: result.district,
+                ward: result.ward,
+                latitude: parseFloat(latitude),
+                longitude: parseFloat(longitude),
+                detail_level: result.detailLevel || 'unknown',
+                provider: result.provider || 'unknown'
+            }
+        });
+    } catch (error) {
+        console.error('Reverse geocoding error:', error);
+        return res.status(500).json({
+            success: false,
+            error: {
+                code: 'REVERSE_GEOCODING_ERROR',
+                message: 'Đã có lỗi xảy ra khi chuyển đổi tọa độ thành địa chỉ',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            }
+        });
+    }
+};
+
+// Get nearest fields (simplified version)
+const getNearestFields = async (req, res) => {
+    try {
+        const { latitude, longitude, limit = 5 } = req.query;
+
+        if (!latitude || !longitude) {
+            return res.status(400).json(responseFormatter.error(
+                'Vui lòng cung cấp tọa độ (latitude, longitude)',
+                400
+            ));
+        }
+
+        const searchLat = parseFloat(latitude);
+        const searchLon = parseFloat(longitude);
+
+        if (!geocodingService.validateCoordinates(searchLat, searchLon)) {
+            return res.status(400).json(responseFormatter.error(
+                'Tọa độ không hợp lệ',
+                400
+            ));
+        }
+
+        // Use 50km radius for "nearest" search
+        const fields = await searchFieldsByLocationInternal(searchLat, searchLon, 50, parseInt(limit));
+
+        return res.json(responseFormatter.success({
+            nearest_fields: fields.slice(0, parseInt(limit)),
+            search_coordinates: {
+                latitude: searchLat,
+                longitude: searchLon
+            }
+        }));
+        
+    } catch (error) {
+        logger.error('Error in getNearestFields:', error);
+        return res.status(500).json(responseFormatter.error(
+            'Đã có lỗi xảy ra khi tìm kiếm sân bóng gần nhất',
+            500
+        ));
+    }
+};
+
+// Internal helper function for location search
+const searchFieldsByLocationInternal = async (latitude, longitude, radiusKm, limitNumber = null) => {
+    const bounds = geocodingService.getBounds(latitude, longitude, radiusKm);
+
+    const queryOptions = {
+        where: {
+            is_verified: true
+        },
+        include: [
+            {
+                model: Location,
+                as: 'location',
+                where: {
+                    latitude: {
+                        [Op.between]: [bounds.minLat, bounds.maxLat]
+                    },
+                    longitude: {
+                        [Op.between]: [bounds.minLon, bounds.maxLon]
+                    },
+                    latitude: { [Op.not]: null },
+                    longitude: { [Op.not]: null }
+                },
+                attributes: [
+                    'id', 'latitude', 'longitude', 'address_text', 
+                    'formatted_address', 'city', 'district', 'ward'
+                ]
+            },
+            {
+                model: User,
+                as: 'owner',
+                attributes: ['id', 'name', 'phone']
+            },
+            {
+                model: SubField,
+                as: 'subfields',
+                attributes: ['id', 'name', 'field_type']
+            }
+        ],
+        attributes: [
+            'id', 'name', 'description', 'price_per_hour', 
+            'images1', 'images2', 'images3', 'is_verified', 
+            'created_at'
+        ]
+    };
+
+    if (limitNumber) {
+        queryOptions.limit = limitNumber * 3; // Get more than needed for distance filtering
+    }
+
+    const fieldsInBounds = await Field.findAll(queryOptions);
+
+    // Calculate exact distances and filter by radius
+    const fieldsWithDistance = geocodingService.findLocationsWithinRadius(
+        latitude, 
+        longitude, 
+        fieldsInBounds.map(field => ({
+            ...field.toJSON(),
+            latitude: field.location.latitude,
+            longitude: field.location.longitude
+        })), 
+        radiusKm
+    );
+
+    return fieldsWithDistance;
+};
+
 module.exports = {
     getAllFields,
     getFields,
     addField,
     getFieldDetail,
-    searchFields,
-    // Thêm các chức năng mới
+    searchFields,    // Location-based search functions
+    searchFieldsByLocation,
+    geocodeAddress,
+    reverseGeocodeAddress,
+    getNearestFields,
+    // ...existing functions...
     getOwnerFields,
     addFieldWithFiles,
     updateFieldWithFiles,
