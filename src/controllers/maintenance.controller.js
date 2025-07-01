@@ -125,7 +125,7 @@ const removeSingleMaintenance = async (req, res) => {
       getSocketInstance()
     );
 
-    if (result.slot.status === "available") {
+    if (result.slot.status === "available" || result.slot.deleted) {
       return res.json(
         responseFormatter.success(
           result,
@@ -379,7 +379,7 @@ const removeMaintenanceByFieldTime = async (req, res) => {
       getSocketInstance()
     );
 
-    if (result.slot.status === "available") {
+    if (result.slot.status === "available" || result.slot.deleted) {
       return res.json(
         responseFormatter.success(
           result,

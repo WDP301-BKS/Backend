@@ -205,13 +205,18 @@ SELECT id, name, field_type
     const conflicts = [];
     
     for (const requestedSlot of requestedSlots) {
+      // Handle both formats: camelCase (subFieldId, startTime, endTime) and snake_case (sub_field_id, start_time, end_time)
+      const subFieldId = requestedSlot.subFieldId || requestedSlot.sub_field_id;
+      const startTime = requestedSlot.startTime || requestedSlot.start_time;
+      const endTime = requestedSlot.endTime || requestedSlot.end_time;
+      
       const conflict = unavailableSlots.find(slot => 
-        slot.sub_field_id === requestedSlot.subFieldId &&
+        slot.sub_field_id === subFieldId &&
         this.timeRangesOverlap(
           slot.start_time,
           slot.end_time,
-          requestedSlot.startTime,
-          requestedSlot.endTime
+          startTime,
+          endTime
         )
       );
       

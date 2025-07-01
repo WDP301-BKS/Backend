@@ -33,4 +33,10 @@ router.patch(
   timeSlotController.updateTimeSlotStatus
 );
 
+// API tính giá cho time slot cụ thể
+router.post(
+  "/calculate-price",
+  timeSlotController.calculateSlotPrice
+);
+
 module.exports = router;

@@ -1,5 +1,6 @@
 const { TimeSlot, SubField, Field, FieldPricingRule } = require("../models");
 const { Op, Sequelize } = require("sequelize");
+const dbOptimizer = require("../utils/dbOptimizer");
 
 const { formatDateForDB } = require("../utils/dateUtils"); // Giả sử bạn có một tiện ích để định dạng ngày
 
@@ -276,7 +277,7 @@ const setMaintenanceStatus = async (params, io = null) => {
           maintenanceReason: reason,
           maintenanceUntil: estimatedCompletion,
         });
-      }); // Emit realtime updates to all clients viewing affected fields
+      });      // Emit realtime updates to all clients viewing affected fields
       Object.keys(fieldSlots).forEach((fieldId) => {
         const formattedSlots = fieldSlots[fieldId].map((slot) => ({
           id: slot.id,
@@ -297,6 +298,25 @@ const setMaintenanceStatus = async (params, io = null) => {
           timestamp: new Date().toISOString(),
         });
       });
+
+      // Clear availability cache for affected field-date combinations
+      const uniqueFieldDates = new Set();
+      affectedSlots.forEach((slot) => {
+        const fieldId = slot.subfield.field_id;
+        const date = slot.date;
+        uniqueFieldDates.add(`${fieldId}:${date}`);
+      });
+
+      // Clear cache for each unique field-date combination
+      for (const fieldDate of uniqueFieldDates) {
+        const [fieldId, date] = fieldDate.split(':');
+        try {
+          await dbOptimizer.clearAvailabilityCache(fieldId, date);
+          console.log(`✅ Cleared availability cache for field ${fieldId} on ${date} after setting maintenance`);
+        } catch (error) {
+          console.error(`❌ Error clearing cache for field ${fieldId} on ${date}:`, error);
+        }
+      }
     }
     return {
       affected: createdCount + updatedCount,
@@ -349,21 +369,14 @@ const revertMaintenanceStatus = async (slotIds, io = null) => {
       };
     }
 
-    // Update slots
-    const [updatedCount] = await TimeSlot.update(
-      {
-        status: "available",
-        maintenance_reason: null,
-        maintenance_until: null,
-        updated_at: new Date(),
+    // Delete maintenance slots instead of updating to available
+    // This prevents unique constraint violations when users try to book
+    const deletedCount = await TimeSlot.destroy({
+      where: {
+        id: { [Op.in]: slotIds },
+        status: "maintenance",
       },
-      {
-        where: {
-          id: { [Op.in]: slotIds },
-          status: "maintenance",
-        },
-      }
-    );
+    });
 
     // Group by field for realtime updates
     if (io) {
@@ -395,8 +408,27 @@ const revertMaintenanceStatus = async (slotIds, io = null) => {
       });
     }
 
+    // Clear availability cache for affected field-date combinations
+    const uniqueFieldDates = new Set();
+    slotsToUpdate.forEach((slot) => {
+      const fieldId = slot.subfield.field_id;
+      const date = slot.date;
+      uniqueFieldDates.add(`${fieldId}:${date}`);
+    });
+
+    // Clear cache for each unique field-date combination
+    for (const fieldDate of uniqueFieldDates) {
+      const [fieldId, date] = fieldDate.split(':');
+      try {
+        await dbOptimizer.clearAvailabilityCache(fieldId, date);
+        console.log(`✅ Cleared availability cache for field ${fieldId} on ${date}`);
+      } catch (error) {
+        console.error(`❌ Error clearing cache for field ${fieldId} on ${date}:`, error);
+      }
+    }
+
     return {
-      affected: updatedCount,
+      affected: deletedCount,
       revertedSlots: slotsToUpdate.map((slot) => ({
         id: slot.id,
         subFieldId: slot.sub_field_id,
@@ -448,26 +480,41 @@ const toggleMaintenanceStatus = async (
 
     const newStatus =
       slot.status === "maintenance" ? "available" : "maintenance";
-    const updateData = {
+
+    let affectedSlotInfo = {
+      id: slot.id,
+      subFieldId: slot.sub_field_id,
+      subFieldName: slot.subfield.name,
+      date: slot.date,
+      startTime: slot.start_time,
+      endTime: slot.end_time,
       status: newStatus,
-      updated_at: new Date(),
+      maintenanceReason: newStatus === "maintenance" ? reason : null,
+      maintenanceUntil: newStatus === "maintenance" ? estimatedCompletion : null,
     };
 
     if (newStatus === "maintenance") {
+      // Setting maintenance - update the slot
       if (!reason) {
         throw new Error("Maintenance reason is required");
       }
-      updateData.maintenance_reason = reason;
-      updateData.maintenance_until = estimatedCompletion;
-    } else {
-      updateData.maintenance_reason = null;
-      updateData.maintenance_until = null;
-    }
+      const updateData = {
+        status: "maintenance",
+        maintenance_reason: reason,
+        maintenance_until: estimatedCompletion,
+        updated_at: new Date(),
+      };
 
-    // Update the slot
-    await TimeSlot.update(updateData, {
-      where: { id: slotId },
-    });
+      await TimeSlot.update(updateData, {
+        where: { id: slotId },
+      });
+    } else {
+      // Removing maintenance - delete the slot instead of updating to available
+      // This prevents unique constraint violations when users try to book
+      await TimeSlot.destroy({
+        where: { id: slotId },
+      });
+    }
 
     // Emit realtime update
     if (io) {
@@ -478,22 +525,17 @@ const toggleMaintenanceStatus = async (
             ? "maintenance-added"
             : "maintenance-removed",
         fieldId,
-        affectedSlots: [
-          {
-            id: slot.id,
-            subFieldId: slot.sub_field_id,
-            subFieldName: slot.subfield.name,
-            date: slot.date,
-            startTime: slot.start_time,
-            endTime: slot.end_time,
-            status: newStatus,
-            maintenanceReason: newStatus === "maintenance" ? reason : null,
-            maintenanceUntil:
-              newStatus === "maintenance" ? estimatedCompletion : null,
-          },
-        ],
+        affectedSlots: [affectedSlotInfo],
         timestamp: new Date().toISOString(),
       });
+
+      // Clear availability cache when maintenance status changes
+      try {
+        await dbOptimizer.clearAvailabilityCache(fieldId, slot.date);
+        console.log(`✅ Cleared availability cache for field ${fieldId} on ${slot.date} after toggling maintenance`);
+      } catch (error) {
+        console.error(`❌ Error clearing cache for field ${fieldId} on ${slot.date}:`, error);
+      }
     }
 
     return {
@@ -504,6 +546,7 @@ const toggleMaintenanceStatus = async (
         maintenanceReason: newStatus === "maintenance" ? reason : null,
         maintenanceUntil:
           newStatus === "maintenance" ? estimatedCompletion : null,
+        deleted: newStatus === "available", // Indicate if slot was deleted
       },
     };
   } catch (error) {
