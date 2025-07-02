@@ -1,4 +1,4 @@
-const { Booking, TimeSlot, Field, User, SubField, Location, Payment } = require('../models');
+const { Booking, TimeSlot, Field, User, SubField, Location, Payment, FieldPricingRule } = require('../models');
 const { ValidationError, Op } = require('sequelize');
 const { sequelize } = require('../config/db.config');
 const responseFormatter = require('../utils/responseFormatter');
@@ -696,6 +696,118 @@ const processPayment = async (req, res) => {
     }
 };
 
+// Get field availability with pricing information for user booking
+const getFieldAvailabilityWithPricing = async (req, res) => {
+    const operationId = performanceMonitor.startOperation('get_field_availability_pricing', {
+        type: 'booking_availability_pricing',
+        fieldId: req.params.fieldId,
+        date: req.query.date
+    });
+
+    try {
+        const { fieldId } = req.params;
+        const { date } = req.query;
+
+        if (!date) {
+            performanceMonitor.endOperation(operationId, { error: 'VALIDATION_ERROR' });
+            return res.status(400).json(responseFormatter.error({
+                code: 'VALIDATION_ERROR',
+                message: 'Ngày không được để trống'
+            }));
+        }
+
+        // Get field info and pricing rules with better error handling
+        const field = await Field.findByPk(fieldId, {
+            include: [{
+                model: FieldPricingRule,
+                as: 'pricingRules',
+                required: false,
+                order: [['from_hour', 'ASC']] // Ensure consistent ordering
+            }]
+        });
+
+        if (!field) {
+            performanceMonitor.endOperation(operationId, { error: 'FIELD_NOT_FOUND' });
+            return res.status(404).json(responseFormatter.error({
+                code: 'FIELD_NOT_FOUND',
+                message: 'Không tìm thấy sân'
+            }));
+        }
+
+        console.log(`Field ${fieldId} pricing rules:`, field.pricingRules?.length || 0, 'rules found');
+
+        // Get availability data
+        const availabilityResult = await retryMechanism.executeDatabaseOperation(
+            () => dbOptimizer.checkAvailabilityOptimized(fieldId, date, []),
+            'availability_check'
+        );
+
+        // Get subfields for price calculation
+        const subfields = await SubField.findAll({
+            where: { field_id: fieldId },
+            attributes: ['id', 'name', 'field_type']
+        });
+
+        // Enhance unavailable slots with pricing information
+        const unavailableSlotsWithPricing = availabilityResult.unavailableSlots.map(slot => {
+            const hour = parseInt(slot.start_time.split(':')[0]);
+            
+            // Find applicable pricing rule
+            const applicableRule = field.pricingRules?.find(
+                rule => hour >= rule.from_hour && hour < rule.to_hour
+            );
+            
+            const basePrice = field.price_per_hour || 0;
+            const multiplier = applicableRule ? applicableRule.multiplier : 1.0;
+            const finalPrice = Math.round(basePrice * multiplier);
+
+            return {
+                ...slot,
+                base_price: basePrice,
+                peak_hour_multiplier: multiplier,
+                calculated_price: finalPrice,
+                is_peak_hour: multiplier > 1.0
+            };
+        });
+
+        performanceMonitor.endOperation(operationId, { success: true });
+
+        return res.json(responseFormatter.success({
+            fieldId,
+            date,
+            field: {
+                id: field.id,
+                name: field.name,
+                price_per_hour: field.price_per_hour,
+                pricingRules: field.pricingRules || [] // Always return array, never undefined
+            },
+            subfields: subfields.map(sf => ({
+                id: sf.id,
+                name: sf.name,
+                field_type: sf.field_type
+            })),
+            unavailableSlots: unavailableSlotsWithPricing,
+            isAvailable: availabilityResult.isAvailable,
+            conflicts: availabilityResult.conflicts || [],
+            // Add debug info
+            debug: {
+                pricingRulesCount: field.pricingRules?.length || 0,
+                basePrice: field.price_per_hour,
+                timestamp: new Date().toISOString()
+            }
+        }));
+
+    } catch (error) {
+        console.error('Error in getFieldAvailabilityWithPricing:', error);
+        performanceMonitor.endOperation(operationId, { error: error.message });
+        return res.status(500).json(responseFormatter.error({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Đã có lỗi xảy ra khi kiểm tra tình trạng sân',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        }));
+    }
+};
+
 module.exports = {
     getFieldAvailability,
     createBooking,
@@ -704,5 +816,6 @@ module.exports = {
     getBookingById,
     getBookingStats,
     testEmail,
-    processPayment
+    processPayment,
+    getFieldAvailabilityWithPricing
 };

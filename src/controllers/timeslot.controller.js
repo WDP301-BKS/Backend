@@ -181,11 +181,33 @@ const findTimeSlotByFieldDateTime = async (req, res) => {
   }
 };
 
+/**
+ * API tính giá cho time slot cụ thể
+ * POST /api/timeslots/calculate-price
+ */
+const calculateSlotPrice = async (req, res) => {
+  try {
+    const { fieldId, startTime } = req.body;
+
+    if (!fieldId || !startTime) {
+      return res.status(400).json(responseFormatter.error('Thiếu fieldId hoặc startTime', 400));
+    }
+
+    const priceInfo = await timeSlotService.calculatePriceWithPricingRule(fieldId, startTime);
+
+    return res.json(responseFormatter.success(priceInfo, 'Tính giá thành công'));
+  } catch (error) {
+    console.error('Error calculating price:', error);
+    return res.status(500).json(responseFormatter.error(error.message || 'Lỗi tính giá', 500));
+  }
+};
+
 module.exports = {
   updatePeakHourMultiplier,
   bulkUpdatePeakHour,
   getSubFieldsByFieldId,
   getTimeSlotById,
   updateTimeSlotStatus,
-  findTimeSlotByFieldDateTime
+  findTimeSlotByFieldDateTime,
+  calculateSlotPrice
 };
