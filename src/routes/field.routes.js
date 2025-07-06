@@ -9,6 +9,12 @@ router.get('/search', fieldController.searchFields);
 router.get('/all', fieldController.getAllFields);
 router.get('/', fieldController.getFields);
 
+// Location-based search routes
+router.get('/search/location', fieldController.searchFieldsByLocation);
+router.get('/nearest', fieldController.getNearestFields);
+router.post('/geocode', fieldController.geocodeAddress);
+router.post('/geocode/reverse', fieldController.reverseGeocodeAddress);
+
 // Owner specific routes (must be before /:id route)
 router.get('/owner/my-fields', authMiddleware, isOwner, fieldController.getOwnerFields);
 
