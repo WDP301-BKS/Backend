@@ -5,6 +5,7 @@ const sequelize = require('sequelize');
 const { uploadImage } = require('../config/cloudinaryConfig');
 const geocodingService = require('../services/geocoding.enhanced');
 const logger = require('../utils/logger');
+const { getFieldQueryWithPackageValidation } = require('../middlewares/packageValidation.middleware');
 
 // Get all fields without pagination
 const getAllFields = async (req, res) => {
@@ -22,7 +23,18 @@ const getAllFields = async (req, res) => {
                 {
                     model: User,
                     as: 'owner',
-                    attributes: ['id', 'name', 'phone']
+                    attributes: ['id', 'name', 'phone', 'package_type', 'package_expire_date'],
+                    where: {
+                        [Op.and]: [
+                            { package_type: { [Op.ne]: 'none' } },
+                            {
+                                [Op.or]: [
+                                    { package_expire_date: { [Op.gte]: new Date() } },
+                                    { package_expire_date: { [Op.is]: null } }
+                                ]
+                            }
+                        ]
+                    }
                 },
                 {
                     model: SubField,
@@ -817,45 +829,77 @@ const getFieldDetail = async (req, res) => {
 // Search fields by name
 const searchFields = async (req, res) => {
     try {
-        let { name } = req.query;
+        let { name, field_type } = req.query;
         
-        if (!name) {
+        // Kiểm tra ít nhất một trong hai tiêu chí tìm kiếm được cung cấp
+        if (!name && !field_type) {
             return res.status(400).json({
                 success: false,
                 error: {
                     code: 'VALIDATION_ERROR',
-                    message: 'Vui lòng nhập tên sân cần tìm'
+                    message: 'Vui lòng nhập tên sân hoặc chọn loại sân cần tìm'
                 }
             });
         }
 
-        // Chuẩn hóa chuỗi tìm kiếm
-        name = decodeURIComponent(name).trim();
-        console.log('Search term after decode:', name);
+        // Chuẩn hóa chuỗi tìm kiếm nếu có
+        if (name) {
+            name = decodeURIComponent(name).trim();
+            console.log('Search term name after decode:', name);
+        }
+        
+        if (field_type) {
+            field_type = decodeURIComponent(field_type).trim();
+            console.log('Search term field_type after decode:', field_type);
+        }
+
+        // Xây dựng điều kiện WHERE
+        let whereCondition = {
+            is_verified: true // Chỉ tìm các sân đã được xác minh
+        };
+        
+        // Điều kiện tìm theo tên sân
+        if (name) {
+            whereCondition.name = {
+                [Op.iLike]: `%${name}%`
+            };
+        }
+
+        // Thiết lập include cho các mối quan hệ
+        const includeModels = [
+            {
+                model: Location,
+                as: 'location',
+                attributes: ['address_text', 'city', 'district', 'ward']
+            },
+            {
+                model: User,
+                as: 'owner',
+                attributes: ['id', 'name', 'phone']
+            }
+        ];
+        
+        // Điều kiện cho subfields (loại sân)
+        if (field_type) {
+            includeModels.push({
+                model: SubField,
+                as: 'subfields',
+                where: {
+                    field_type: field_type
+                },
+                attributes: ['id', 'name', 'field_type']
+            });
+        } else {
+            includeModels.push({
+                model: SubField,
+                as: 'subfields',
+                attributes: ['id', 'name', 'field_type']
+            });
+        }
 
         const fields = await Field.findAll({
-            where: {
-                name: {
-                    [Op.iLike]: `%${name}%`
-                }
-            },
-            include: [
-                {
-                    model: Location,
-                    as: 'location',
-                    attributes: ['address_text', 'city', 'district', 'ward']
-                },
-                {
-                    model: User,
-                    as: 'owner',
-                    attributes: ['id', 'name', 'phone']
-                },
-                {
-                    model: SubField,
-                    as: 'subfields',
-                    attributes: ['id', 'name', 'field_type']
-                }
-            ],
+            where: whereCondition,
+            include: includeModels,
             attributes: [
                 'id', 
                 'name', 
@@ -1766,12 +1810,109 @@ const searchFieldsByLocationInternal = async (latitude, longitude, radiusKm, lim
     return fieldsWithDistance;
 };
 
+// Manual package validation endpoint (Admin only)
+const validatePackagesManual = async (req, res) => {
+    try {
+        const { runPackageValidationNow } = require('../utils/cronJobs');
+        
+        console.log('[MANUAL_VALIDATION] Admin đang chạy kiểm tra gói dịch vụ thủ công...');
+        await runPackageValidationNow();
+        
+        return res.json({
+            success: true,
+            message: 'Đã hoàn thành kiểm tra và cập nhật trạng thái gói dịch vụ',
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Error in validatePackagesManual:', error);
+        return res.status(500).json({
+            success: false,
+            error: {
+                code: 'VALIDATION_ERROR',
+                message: 'Có lỗi xảy ra khi kiểm tra gói dịch vụ',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            }
+        });
+    }
+};
+
+// Get fields with package status check
+const getFieldsWithPackageCheck = async (req, res) => {
+    try {
+        const fields = await Field.findAll({
+            where: {
+                is_verified: true
+            },
+            include: [
+                {
+                    model: User,
+                    as: 'owner',
+                    attributes: ['id', 'name', 'package_type', 'package_expire_date'],
+                    where: {
+                        [Op.and]: [
+                            { package_type: { [Op.ne]: 'none' } },
+                            {
+                                [Op.or]: [
+                                    { package_expire_date: { [Op.gte]: new Date() } },
+                                    { package_expire_date: { [Op.is]: null } }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    model: Location,
+                    as: 'location',
+                    attributes: ['address_text', 'city', 'district', 'ward']
+                }
+            ],
+            attributes: ['id', 'name', 'description', 'price_per_hour', 'images1', 'images2', 'images3'],
+            order: [['created_at', 'DESC']]
+        });
+
+        // Thêm thông tin về trạng thái gói cho mỗi field
+        const fieldsWithPackageInfo = fields.map(field => {
+            const fieldData = field.toJSON();
+            const owner = fieldData.owner;
+            
+            fieldData.packageStatus = {
+                hasValidPackage: owner.package_type !== 'none',
+                packageType: owner.package_type,
+                expireDate: owner.package_expire_date,
+                isExpired: owner.package_expire_date ? new Date(owner.package_expire_date) < new Date() : false
+            };
+            
+            return fieldData;
+        });
+
+        return res.json({
+            success: true,
+            data: fieldsWithPackageInfo,
+            meta: {
+                total: fieldsWithPackageInfo.length,
+                checkedAt: new Date().toISOString()
+            }
+        });
+    } catch (error) {
+        console.error('Error in getFieldsWithPackageCheck:', error);
+        return res.status(500).json({
+            success: false,
+            error: {
+                code: 'INTERNAL_SERVER_ERROR',
+                message: 'Đã có lỗi xảy ra khi lấy danh sách sân',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            }
+        });
+    }
+};
+
 module.exports = {
     getAllFields,
     getFields,
     addField,
     getFieldDetail,
-    searchFields,    // Location-based search functions
+    searchFields,
+    // Location-based search functions
     searchFieldsByLocation,
     geocodeAddress,
     reverseGeocodeAddress,
@@ -1784,5 +1925,8 @@ module.exports = {
     // License management functions
     getUserLicense,
     updateUserLicense,
-    deleteLicenseDocument
+    deleteLicenseDocument,
+    // Package validation functions
+    validatePackagesManual,
+    getFieldsWithPackageCheck
 };
