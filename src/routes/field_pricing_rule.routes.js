@@ -14,7 +14,6 @@ router.post(
 // API lấy danh sách quy tắc giá của một field
 router.get(
   '/field/:fieldId',
-  authMiddleware,
   fieldPricingRuleController.getPricingRulesByField
 );
 

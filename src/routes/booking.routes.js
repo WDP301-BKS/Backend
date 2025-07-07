@@ -11,6 +11,8 @@ router.get('/field/:fieldId/availability-with-pricing', bookingController.getFie
 router.get('/user', authMiddleware, bookingController.getUserBookings);
 router.get('/stats', authMiddleware, bookingController.getBookingStats);
 router.post('/test-email', authMiddleware, bookingController.testEmail); // Test email endpoint
+router.post('/cancel-for-maintenance', authMiddleware, bookingController.cancelBookingForMaintenance); // Cancel booking for maintenance
+router.post('/cancel-multiple-for-maintenance', authMiddleware, bookingController.cancelMultipleBookingsForMaintenance); // Cancel multiple bookings for maintenance
 router.post('/', authMiddleware, bookingController.createBooking);
 router.get('/:id', authMiddleware, bookingController.getBookingById); 
 router.post('/:id/payment', authMiddleware, bookingController.processPayment);

@@ -14,20 +14,32 @@ const onlineUsers = new Map();
 const initializeSocket = (httpServer) => {
   io = new Server(httpServer, {
     cors: {
-      origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-      methods: ['GET', 'POST'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      origin: [
+        process.env.FRONTEND_URL || 'http://localhost:5173',
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'https://localhost:5173'
+      ],
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'x-correlation-id'],
       credentials: true
     },
-    transports: ['websocket', 'polling']
+    transports: ['websocket', 'polling'],
+    allowEIO3: true,
+    pingTimeout: 60000,
+    pingInterval: 25000
   });
 
   // Authentication middleware
   io.use(async (socket, next) => {
     try {
-      const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace('Bearer ', '');
+      // Get token from various sources
+      const token = socket.handshake.auth.token || 
+                   socket.handshake.headers.authorization?.replace('Bearer ', '') ||
+                   socket.handshake.query.token;
       
       if (!token) {
+        logger.warn('Socket connection attempt without token');
         return next(new Error('Authentication error: No token provided'));
       }
 
@@ -41,6 +53,7 @@ const initializeSocket = (httpServer) => {
       });
 
       if (!user || !user.is_active) {
+        logger.warn(`Socket authentication failed - user not found or inactive: ${decoded.id}`);
         return next(new Error('Authentication error: User not found or inactive'));
       }
 
@@ -1332,6 +1345,34 @@ const disconnectUser = (userId) => {
   }
 };
 
+// Emit field availability update to subscribers
+const emitFieldAvailabilityUpdate = (fieldId, date, availabilityData) => {
+  try {
+    if (!io) {
+      logger.warn('Socket.IO not initialized');
+      return false;
+    }
+    if (!fieldId || !date || !availabilityData) {
+      logger.warn('Invalid parameters for emitFieldAvailabilityUpdate');
+      return false;
+    }
+    
+    // Emit to field room
+    io.to(`field_${fieldId}_${date}`).emit('field_availability_update', {
+      fieldId,
+      date,
+      ...availabilityData,
+      timestamp: new Date()
+    });
+    
+    logger.info(`Field availability update emitted for field ${fieldId} on ${date}`);
+    return true;
+  } catch (error) {
+    logger.error('Error emitting field availability update:', error);
+    return false;
+  }
+};
+
 // Module exports
 module.exports = {
   initializeSocket,
@@ -1345,6 +1386,7 @@ module.exports = {
   emitNotification,
   emitUserNotification,
   emitMessagesRead,
+  emitFieldAvailabilityUpdate,
   isUserOnline,
   getOnlineUsersCount,
   getOnlineUsersList,

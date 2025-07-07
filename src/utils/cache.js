@@ -112,6 +112,33 @@ exports.deleteMany = (keys) => {
 };
 
 /**
+ * Delete keys matching a pattern
+ * @param {string} pattern - Pattern to match (supports * wildcard)
+ * @returns {number} Number of removed keys
+ */
+exports.delPattern = (pattern) => {
+  try {
+    const keys = cache.keys();
+    const matchingKeys = keys.filter(key => {
+      // Simple pattern matching with * wildcard
+      const regex = new RegExp(pattern.replace(/\*/g, '.*'));
+      return regex.test(key);
+    });
+    
+    if (matchingKeys.length > 0) {
+      const count = cache.del(matchingKeys);
+      logger.debug(`Cache delPattern: ${pattern}`, { matchingKeys, count });
+      return count;
+    }
+    
+    return 0;
+  } catch (error) {
+    logger.error(`Cache delPattern failed for pattern: ${pattern}`, { error });
+    return 0;
+  }
+};
+
+/**
  * Clear all keys from cache
  * @returns {boolean} Success
  */
@@ -185,4 +212,10 @@ exports.cacheMiddleware = (keyPrefix, keyFn, ttl = undefined) => {
       next(); // Continue without caching
     }
   };
-}; 
+};
+
+// Aliases for common methods
+exports.del = exports.delete;
+
+// Export the underlying cache instance for advanced usage
+exports._cache = cache;

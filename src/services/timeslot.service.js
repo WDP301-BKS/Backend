@@ -1,4 +1,4 @@
-const { TimeSlot, SubField, Field, FieldPricingRule } = require("../models");
+const { TimeSlot, SubField, Field, FieldPricingRule, Booking } = require("../models");
 const { Op, Sequelize } = require("sequelize");
 const dbOptimizer = require("../utils/dbOptimizer");
 
@@ -192,16 +192,27 @@ const setMaintenanceStatus = async (params, io = null) => {
               attributes: ["field_id", "name"],
               required: true,
             },
+            {
+              model: Booking,
+              as: "booking",
+              attributes: ["id", "status", "payment_status"],
+              required: false,
+            },
           ],
         });
 
         if (slot) {
-          // Update existing slot to maintenance only if not already in maintenance and not booked
-          if (slot.status === "booked") {
-            // Skip booked slots - don't count them as affected
+          // Check if slot is occupied by a booking (including pending payment)
+          const isOccupied = 
+            slot.status === "booked" || 
+            (slot.booking_id && slot.booking && 
+             (slot.booking.status === "payment_pending" || slot.booking.status === "confirmed"));
+
+          if (isOccupied) {
+            // Skip occupied slots (booked or pending payment) - don't count them as affected
             continue;
           } else if (slot.status !== "maintenance") {
-            // Only update if not already in maintenance
+            // Only update if not already in maintenance and not occupied
             await slot.update({
               status: "maintenance",
               maintenance_reason: reason,
@@ -466,6 +477,12 @@ const toggleMaintenanceStatus = async (
           attributes: ["field_id", "name"],
           required: true,
         },
+        {
+          model: Booking,
+          as: "booking",
+          attributes: ["id", "status", "payment_status"],
+          required: false,
+        },
       ],
     });
 
@@ -473,9 +490,15 @@ const toggleMaintenanceStatus = async (
       throw new Error("Time slot not found");
     }
 
-    // Don't allow changing booked slots
-    if (slot.status === "booked") {
-      throw new Error("Cannot change maintenance status of booked time slots");
+    // Check if slot is occupied by a booking (including pending payment)
+    const isOccupied = 
+      slot.status === "booked" || 
+      (slot.booking_id && slot.booking && 
+       (slot.booking.status === "payment_pending" || slot.booking.status === "confirmed"));
+
+    // Don't allow changing occupied slots
+    if (isOccupied) {
+      throw new Error("Cannot change maintenance status of occupied time slots (booked or pending payment)");
     }
 
     const newStatus =
@@ -717,16 +740,27 @@ const setFullDayMaintenanceStatus = async (params, io = null) => {
               attributes: ["field_id", "name"],
               required: true,
             },
+            {
+              model: Booking,
+              as: "booking",
+              attributes: ["id", "status", "payment_status"],
+              required: false,
+            },
           ],
         });
 
         if (slot) {
-          // Update existing slot to maintenance only if not already in maintenance and not booked
-          if (slot.status === "booked") {
-            // Skip booked slots
+          // Check if slot is occupied by a booking (including pending payment)
+          const isOccupied = 
+            slot.status === "booked" || 
+            (slot.booking_id && slot.booking && 
+             (slot.booking.status === "payment_pending" || slot.booking.status === "confirmed"));
+
+          if (isOccupied) {
+            // Skip occupied slots (booked or pending payment)
             skippedBookedCount++;
           } else if (slot.status !== "maintenance") {
-            // Only update if not already in maintenance
+            // Only update if not already in maintenance and not occupied
             await slot.update({
               status: "maintenance",
               maintenance_reason: reason,

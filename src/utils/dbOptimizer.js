@@ -152,12 +152,11 @@ SELECT id, name, field_type
   async checkAvailabilityOptimized(fieldId, date, timeSlots) {
     const cacheKey = `availability:${fieldId}:${date}`;
     
-    // Check cache first
-    const cached = await cache.get(cacheKey);
-    if (cached) {
-      // Filter cached results for requested time slots
-      return this.filterAvailabilityForSlots(cached, timeSlots);
-    }    // Use raw SQL for better performance - Updated with user and booking info
+    // Skip cache for now to ensure fresh data for maintenance updates
+    // TODO: Implement cache invalidation on maintenance status changes
+    console.log(`🔍 Checking availability for field ${fieldId} on ${date}`);
+    
+    // Use raw SQL for better performance - Updated with user and booking info
     const query = `
       SELECT 
         ts.sub_field_id,
@@ -182,18 +181,59 @@ SELECT id, name, field_type
       LEFT JOIN users u ON b.user_id = u.id
       WHERE sf.field_id = :fieldId 
         AND ts.date = :date
-        AND ts.status != 'available'
-        AND (b.status IS NULL OR b.status NOT IN ('cancelled'))
+        AND (
+          ts.status = 'maintenance' 
+          OR (ts.status != 'available' AND ts.booking_id IS NOT NULL AND (b.status IS NULL OR b.status NOT IN ('cancelled')))
+        )
       ORDER BY ts.sub_field_id, ts.start_time
     `;
+    
+    console.log('🔍 Executing query with params:', { fieldId, date });
     
     const unavailableSlots = await sequelize.query(query, {
       replacements: { fieldId, date },
       type: QueryTypes.SELECT
     });
 
-    // Cache for 1 minute
-    await cache.set(cacheKey, unavailableSlots, 60);
+    console.log(`🔧 Found ${unavailableSlots.length} unavailable slots:`);
+    
+    // Also check all timeslots for this field/date regardless of status
+    const allSlotsQuery = `
+      SELECT 
+        ts.sub_field_id,
+        ts.start_time,
+        ts.end_time,
+        ts.status,
+        ts.date,
+        sf.field_id,
+        sf.name as subfield_name
+      FROM timeslots ts
+      INNER JOIN subfields sf ON ts.sub_field_id = sf.id
+      WHERE sf.field_id = :fieldId 
+        AND ts.date = :date
+      ORDER BY ts.sub_field_id, ts.start_time
+    `;
+    
+    const allSlots = await sequelize.query(allSlotsQuery, {
+      replacements: { fieldId, date },
+      type: QueryTypes.SELECT
+    });
+    
+    console.log(`📊 All slots for field ${fieldId} on ${date} (${allSlots.length} total):`);
+    allSlots.forEach(slot => {
+      console.log(`   📍 ${slot.subfield_name} (${slot.sub_field_id}): ${slot.start_time}-${slot.end_time} [${slot.status}]`);
+    });
+    
+    unavailableSlots.forEach(slot => {
+      if (slot.status === 'maintenance') {
+        console.log(`   ⚠️ MAINTENANCE: ${slot.subfield_name} (${slot.start_time}-${slot.end_time}) - ${slot.maintenance_reason}`);
+      } else {
+        console.log(`   📋 ${slot.status.toUpperCase()}: ${slot.subfield_name} (${slot.start_time}-${slot.end_time})`);
+      }
+    });
+
+    // Cache for shorter time to allow faster updates
+    await cache.set(cacheKey, unavailableSlots, 30); // Reduced from 60 to 30 seconds
 
     return this.filterAvailabilityForSlots(unavailableSlots, timeSlots);
   }
@@ -245,7 +285,46 @@ SELECT id, name, field_type
    * Check if two time ranges overlap
    */
   timeRangesOverlap(start1, end1, start2, end2) {
-    return start1 < end2 && start2 < end1;
+    // 🔧 HOTFIX: Normalize time strings before comparison
+    const normalizeTime = (time) => {
+      if (!time) return null;
+      if (typeof time !== 'string') return String(time);
+      if (time.length === 5) return time + ':00';
+      return time;
+    };
+    
+    const normalizedStart1 = normalizeTime(start1);
+    const normalizedEnd1 = normalizeTime(end1);
+    const normalizedStart2 = normalizeTime(start2);
+    const normalizedEnd2 = normalizeTime(end2);
+    
+    console.log('🔧 timeRangesOverlap comparison:');
+    console.log(`  Range 1: ${normalizedStart1} - ${normalizedEnd1}`);
+    console.log(`  Range 2: ${normalizedStart2} - ${normalizedEnd2}`);
+    
+    // Convert to comparable format for proper time comparison
+    const timeToMinutes = (timeStr) => {
+      if (!timeStr) return 0;
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      return hours * 60 + minutes;
+    };
+    
+    const start1Minutes = timeToMinutes(normalizedStart1);
+    const end1Minutes = timeToMinutes(normalizedEnd1);
+    const start2Minutes = timeToMinutes(normalizedStart2);
+    const end2Minutes = timeToMinutes(normalizedEnd2);
+    
+    console.log(`  Range 1 (minutes): ${start1Minutes} - ${end1Minutes}`);
+    console.log(`  Range 2 (minutes): ${start2Minutes} - ${end2Minutes}`);
+    
+    // Check overlap: ranges overlap if start1 < end2 AND start2 < end1
+    const overlaps = start1Minutes < end2Minutes && start2Minutes < end1Minutes;
+    
+    console.log(`  Overlap result: ${overlaps}`);
+    console.log(`  Logic: (${start1Minutes} < ${end2Minutes}) AND (${start2Minutes} < ${end1Minutes})`);
+    console.log(`  Logic: (${start1Minutes < end2Minutes}) AND (${start2Minutes < end1Minutes})`);
+    
+    return overlaps;
   }
 
   /**
@@ -623,7 +702,7 @@ SELECT id, name, field_type
         return {
           error: 'CONFLICT',
           code: 409,
-          message: `Khung giờ ${conflicts[0].requestedSlot.start_time} đã được đặt`,
+          message: `Khung giờ ${conflicts[0].requestedSlot.start_time || 'không xác định'} đã được đặt`,
           details: conflicts
         };
       }
@@ -745,7 +824,47 @@ SELECT id, name, field_type
     
     console.log('🔍 Checking availability with locking for timeslots:', timeSlots);
     
+    // 🔧 HOTFIX: Normalize time formats to prevent string comparison issues
+    const normalizeTime = (time) => {
+      if (!time) {
+        console.log('❌ WARNING: Time is undefined/null:', time);
+        return null;
+      }
+      if (typeof time !== 'string') {
+        console.log('❌ WARNING: Time is not a string:', time, typeof time);
+        return String(time);
+      }
+      if (time.length === 5) return time + ':00';
+      return time;
+    };
+    
     for (const requestedSlot of timeSlots) {
+      console.log('🔧 DEBUG: Processing slot:', requestedSlot);
+      console.log('🔧 DEBUG: Slot keys:', Object.keys(requestedSlot));
+      console.log('🔧 DEBUG: start_time value:', requestedSlot.start_time, typeof requestedSlot.start_time);
+      console.log('🔧 DEBUG: end_time value:', requestedSlot.end_time, typeof requestedSlot.end_time);
+      
+      // 🔧 HOTFIX: Ensure consistent time format before SQL query
+      const normalizedSlot = {
+        ...requestedSlot,
+        start_time: normalizeTime(requestedSlot.start_time),
+        end_time: normalizeTime(requestedSlot.end_time)
+      };
+      
+      console.log('🔧 Original slot:', requestedSlot);
+      console.log('🔧 Normalized slot:', normalizedSlot);
+      
+      // Validate normalized slot
+      if (!normalizedSlot.start_time || !normalizedSlot.end_time) {
+        console.log('❌ ERROR: Normalized slot has undefined time values');
+        conflicts.push({
+          subFieldId: requestedSlot.sub_field_id,
+          error: 'INVALID_TIME_FORMAT',
+          message: `Invalid time format: start_time=${normalizedSlot.start_time}, end_time=${normalizedSlot.end_time}`,
+          requestedSlot: requestedSlot
+        });
+        continue;
+      }
       // Use SELECT FOR UPDATE to lock rows and prevent concurrent modifications
       // This query finds any existing timeslots that overlap with the requested slot
       const query = `
@@ -778,23 +897,41 @@ SELECT id, name, field_type
       `;
       
       try {
+        console.log('🔍 Executing overlap check query with params:', {
+          fieldId,
+          date,
+          subFieldId: normalizedSlot.sub_field_id,
+          startTime: normalizedSlot.start_time,
+          endTime: normalizedSlot.end_time
+        });
+
         const conflictingSlots = await sequelize.query(query, {
           replacements: { 
             fieldId, 
             date,
-            subFieldId: requestedSlot.sub_field_id,
-            startTime: requestedSlot.start_time,
-            endTime: requestedSlot.end_time
+            subFieldId: normalizedSlot.sub_field_id,
+            startTime: normalizedSlot.start_time,
+            endTime: normalizedSlot.end_time
           },
           type: QueryTypes.SELECT,
           transaction
         });
         
+        console.log('🔍 Query result - conflicting slots found:', conflictingSlots.length);
+        if (conflictingSlots.length > 0) {
+          console.log('❌ Conflicting slot details:', conflictingSlots[0]);
+          console.log('❌ Overlap logic check:');
+          console.log(`  Existing: ${conflictingSlots[0].start_time} - ${conflictingSlots[0].end_time}`);
+          console.log(`  Requested: ${normalizedSlot.start_time} - ${normalizedSlot.end_time}`);
+          console.log(`  Logic: (${conflictingSlots[0].start_time} < ${normalizedSlot.end_time}) AND (${conflictingSlots[0].end_time} > ${normalizedSlot.start_time})`);
+          console.log(`  Result: (${conflictingSlots[0].start_time < normalizedSlot.end_time}) AND (${conflictingSlots[0].end_time > normalizedSlot.start_time})`);
+        }
+        
         if (conflictingSlots.length > 0) {
           console.log('❌ Found conflicting slots:', conflictingSlots);
           
           conflicts.push({
-            subFieldId: requestedSlot.sub_field_id,
+            subFieldId: normalizedSlot.sub_field_id,
             subFieldName: conflictingSlots[0].subfield_name,
             conflictingSlot: {
               id: conflictingSlots[0].id,
@@ -805,10 +942,10 @@ SELECT id, name, field_type
               bookingStatus: conflictingSlots[0].booking_status,
               paymentStatus: conflictingSlots[0].payment_status
             },
-            requestedSlot: requestedSlot
+            requestedSlot: normalizedSlot
           });
         } else {
-          console.log('✅ No conflicts found for slot:', requestedSlot);
+          console.log('✅ No conflicts found for slot:', normalizedSlot);
         }
         
       } catch (error) {
@@ -820,13 +957,13 @@ SELECT id, name, field_type
           
           console.log('🔒 Lock timeout detected, treating as conflict');
           conflicts.push({
-            subFieldId: requestedSlot.sub_field_id,
+            subFieldId: normalizedSlot.sub_field_id,
             subFieldName: 'Unknown (lock timeout)',
             conflictingSlot: {
               error: 'Lock timeout - slot likely being booked by another user',
               lockTimeout: true
             },
-            requestedSlot: requestedSlot
+            requestedSlot: normalizedSlot
           });
         } else {
           throw error; // Re-throw unexpected errors
@@ -843,7 +980,18 @@ SELECT id, name, field_type
    */
   async clearAvailabilityCache(fieldId, date) {
     const cacheKey = `availability:${fieldId}:${date}`;
-    await cache.delete(cacheKey);
+    await cache.del(cacheKey);
+    console.log(`🗑️ Cleared availability cache for field ${fieldId} on ${date}`);
+  }
+
+  /**
+   * Clear availability cache for all dates of a field
+   */
+  async clearFieldCache(fieldId) {
+    // Get all cache keys that match the pattern
+    const pattern = `availability:${fieldId}:*`;
+    await cache.delPattern(pattern);
+    console.log(`🗑️ Cleared all availability cache for field ${fieldId}`);
   }
 
   /**

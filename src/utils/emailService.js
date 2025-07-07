@@ -222,10 +222,135 @@ const sendOwnerBookingNotificationEmail = async (to, ownerName, bookingDetails) 
   return sendEmail(to, subject, text, html);
 };
 
+/**
+ * Gửi email thông báo hủy booking do bảo trì
+ */
+const sendMaintenanceCancellationEmail = async (to, customerName, bookingDetails) => {
+  // 🔍 DEBUG: Log email sending attempt
+  console.log('📧 EMAIL SERVICE: sendMaintenanceCancellationEmail called');
+  console.log('- To:', to);
+  console.log('- Customer Name:', customerName);
+  console.log('- Booking Details:', JSON.stringify(bookingDetails, null, 2));
+  console.log('- Stack trace:', new Error().stack);
+  
+  const subject = 'Thông báo hủy đặt sân do bảo trì';
+  
+  // Support both single time slot (old format) and multiple time slots (new format)
+  const timeSlots = bookingDetails.timeSlots || [{
+    subField: 'N/A',
+    fieldName: bookingDetails.fieldName,
+    startTime: bookingDetails.startTime,
+    endTime: bookingDetails.endTime,
+    date: bookingDetails.bookingDate
+  }];
+  
+  // Create text version
+  let timeSlotText = '';
+  if (timeSlots.length === 1) {
+    timeSlotText = `- Thời gian: ${timeSlots[0].startTime} - ${timeSlots[0].endTime}`;
+  } else {
+    timeSlotText = `- Các khung giờ:\n${timeSlots.map(ts => `  + ${ts.startTime} - ${ts.endTime} (${ts.subField})`).join('\n')}`;
+  }
+  
+  const text = `Xin chào ${customerName},\n\nChúng tôi rất tiếc phải thông báo rằng đặt sân của bạn đã bị hủy do sân cần bảo trì.\n\nThông tin đặt sân:\n- Sân: ${bookingDetails.fieldName}\n- Ngày: ${bookingDetails.bookingDate}\n${timeSlotText}\n- Lý do bảo trì: ${bookingDetails.maintenanceReason}\n\n${bookingDetails.willRefund ? `Thông tin hoàn tiền:\n- Tổng giá trị booking: ${bookingDetails.totalPrice ? bookingDetails.totalPrice.toLocaleString('vi-VN') : bookingDetails.refundAmount.toLocaleString('vi-VN')}đ\n- Số tiền hoàn lại: ${bookingDetails.refundAmount.toLocaleString('vi-VN')}đ (100%)\n- Thời gian hoàn tiền: 5-10 ngày làm việc` : 'Không có khoản phí nào được thu.'}\n\nChúng tôi xin lỗi vì sự bất tiện này.\n\nTrân trọng,\nĐội ngũ hỗ trợ Football Field Booking`;
+  
+  // Create HTML version with support for multiple time slots
+  let timeSlotHtml = '';
+  if (timeSlots.length === 1) {
+    timeSlotHtml = `
+      <tr>
+        <td style="padding: 8px 0; color: #6b7280; font-weight: 500;">Thời gian:</td>
+        <td style="padding: 8px 0; color: #111827; font-weight: 600;">${timeSlots[0].startTime} - ${timeSlots[0].endTime}</td>
+      </tr>`;
+  } else {
+    timeSlotHtml = `
+      <tr>
+        <td style="padding: 8px 0; color: #6b7280; font-weight: 500;">Các khung giờ:</td>
+        <td style="padding: 8px 0; color: #111827; font-weight: 600;">
+          ${timeSlots.map(ts => `
+            <div style="padding: 4px 0; border-left: 3px solid #dc2626; padding-left: 8px; margin: 2px 0;">
+              <strong>${ts.startTime} - ${ts.endTime}</strong><br>
+              <small style="color: #6b7280;">${ts.subField}</small>
+            </div>
+          `).join('')}
+        </td>
+      </tr>`;
+  }
+  
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background-color: #fee2e2; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+        <h2 style="color: #dc2626; margin: 0;">⚠️ Thông báo hủy đặt sân</h2>
+      </div>
+      
+      <p>Xin chào <strong>${customerName}</strong>,</p>
+      
+      <p>Chúng tôi rất tiếc phải thông báo rằng đặt sân của bạn đã bị hủy do sân cần bảo trì khẩn cấp.</p>
+      
+      <div style="background-color: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h3 style="color: #374151; margin-top: 0;">📋 Thông tin đặt sân bị hủy:</h3>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: 500;">Sân:</td>
+            <td style="padding: 8px 0; color: #111827; font-weight: 600;">${bookingDetails.fieldName}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: 500;">Ngày:</td>
+            <td style="padding: 8px 0; color: #111827; font-weight: 600;">${bookingDetails.bookingDate}</td>
+          </tr>
+          ${timeSlotHtml}
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: 500;">Lý do bảo trì:</td>
+            <td style="padding: 8px 0; color: #dc2626; font-weight: 600;">${bookingDetails.maintenanceReason}</td>
+          </tr>
+        </table>
+      </div>
+      
+      ${bookingDetails.willRefund ? `
+      <div style="background-color: #dcfce7; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h3 style="color: #16a34a; margin-top: 0;">💰 Thông tin hoàn tiền</h3>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #15803d; font-weight: 500;">Tổng giá trị booking:</td>
+            <td style="padding: 8px 0; color: #15803d; font-weight: 600;">${bookingDetails.totalPrice ? bookingDetails.totalPrice.toLocaleString('vi-VN') : bookingDetails.refundAmount.toLocaleString('vi-VN')}đ</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #15803d; font-weight: 500;">Số tiền hoàn lại:</td>
+            <td style="padding: 8px 0; color: #15803d; font-weight: 600;">${bookingDetails.refundAmount.toLocaleString('vi-VN')}đ</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #15803d; font-weight: 500;">Tỷ lệ hoàn tiền:</td>
+            <td style="padding: 8px 0; color: #15803d; font-weight: 600;">100%</td>
+          </tr>
+        </table>
+        <p style="color: #15803d; margin: 10px 0 0 0;">
+          Số tiền sẽ được hoàn về thẻ thanh toán của bạn trong vòng <strong>5-10 ngày làm việc</strong>.
+        </p>
+      </div>
+      ` : ''}
+      
+      <div style="background-color: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px 0;">
+        <p style="color: #92400e; margin: 0;">
+          <strong>Xin lỗi vì sự bất tiện:</strong> Chúng tôi hiểu rằng việc hủy đặt sân có thể gây ra bất tiện cho bạn. 
+          Để bù đắp, chúng tôi sẽ ưu tiên phục vụ bạn trong các lần đặt sân tiếp theo.
+        </p>
+      </div>
+      
+      <p>Nếu bạn có bất kỳ câu hỏi nào, vui lòng liên hệ với chúng tôi.</p>
+      
+      <p>Trân trọng,<br>
+      <strong>Đội ngũ hỗ trợ Football Field Booking</strong></p>
+    </div>
+  `;
+
+  return sendEmail(to, subject, text, html);
+};
+
 module.exports = {
   sendEmail,
   sendRegistrationEmail,
   sendPasswordResetEmail,
   sendBookingConfirmationEmail,
-  sendOwnerBookingNotificationEmail
+  sendOwnerBookingNotificationEmail,
+  sendMaintenanceCancellationEmail
 };

@@ -354,8 +354,8 @@ class PaymentController {
           }
         }
 
-        // Use optimized availability check instead of manual loop
-        console.log('Checking availability with optimized method');
+        // Use optimized availability check with proper overlap logic
+        console.log('Checking availability with optimized method (fixed overlap logic)');
         const availabilityResult = await retryMechanism.executeDatabaseOperation(
           () => dbOptimizer.checkAvailabilityOptimized(fieldId, bookingDate, timeSlots),
           'availability_check'
@@ -365,7 +365,7 @@ class PaymentController {
           console.log('❌ Found conflicts:', availabilityResult.conflicts);
           performanceMonitor.endOperation(operationId, { error: 'AVAILABILITY_CONFLICT' });
           const firstConflict = availabilityResult.conflicts[0];
-          const errorMessage = `Time slot ${firstConflict.start_time} is already booked`;
+          const errorMessage = `Time slot ${firstConflict.requestedSlot?.start_time || 'không xác định'} is already booked`;
           console.log('Returning error:', errorMessage);
           
           const errorResponse = responseFormatter.error({ 
