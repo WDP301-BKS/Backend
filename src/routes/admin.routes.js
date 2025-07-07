@@ -20,4 +20,8 @@ router.get('/users/:userId', adminController.getUserDetails);
 router.put('/users/:userId/status', adminController.updateUserStatus);
 router.get('/users/export/excel', adminController.exportUsersToExcel);
 
+// Quản lý gói dịch vụ
+router.post('/packages/validate', adminController.validatePackagesManual);
+router.get('/packages/status', adminController.getPackageStatusReport);
+
 module.exports = router;

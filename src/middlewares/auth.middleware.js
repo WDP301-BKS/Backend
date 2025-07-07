@@ -43,6 +43,7 @@ const authMiddleware = asyncHandler(async (req, res, next) => {
       // Thêm các trường liên quan đến gói dịch vụ
       package_type: user.package_type,
       package_purchase_date: user.package_purchase_date,
+      package_expire_date: user.package_expire_date,
       business_license_image: user.business_license_image,
       identity_card_image: user.identity_card_image,
       identity_card_back_image: user.identity_card_back_image

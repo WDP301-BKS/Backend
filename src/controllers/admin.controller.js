@@ -431,6 +431,101 @@ class AdminController {
       return errorResponse(res, 'Lỗi khi xuất dữ liệu', 500);
     }
   }
+
+  // Kiểm tra gói dịch vụ thủ công (Admin only)
+  async validatePackagesManual(req, res) {
+    try {
+      const { runPackageValidationNow } = require('../utils/cronJobs');
+      
+      console.log('[ADMIN_VALIDATION] Admin đang chạy kiểm tra gói dịch vụ thủ công...');
+      await runPackageValidationNow();
+      
+      return successResponse(res, null, 'Đã hoàn thành kiểm tra và cập nhật trạng thái gói dịch vụ');
+    } catch (error) {
+      console.error('Error in admin validatePackagesManual:', error);
+      return errorResponse(res, 'Có lỗi xảy ra khi kiểm tra gói dịch vụ', 500);
+    }
+  }
+
+  // Lấy báo cáo trạng thái gói dịch vụ
+  async getPackageStatusReport(req, res) {
+    try {
+      // Thống kê tổng quan
+      const totalUsers = await User.count();
+      const usersWithPackages = await User.count({
+        where: { package_type: { [Op.ne]: 'none' } }
+      });
+      const expiredPackages = await User.count({
+        where: {
+          package_type: { [Op.ne]: 'none' },
+          package_expire_date: { [Op.lt]: new Date() }
+        }
+      });
+      const activePackages = await User.count({
+        where: {
+          package_type: { [Op.ne]: 'none' },
+          package_expire_date: { [Op.gte]: new Date() }
+        }
+      });
+
+      // Chi tiết các user có gói hết hạn
+      const usersWithExpiredPackages = await User.findAll({
+        where: {
+          package_type: { [Op.ne]: 'none' },
+          package_expire_date: { [Op.lt]: new Date() }
+        },
+        include: [{
+          model: Field,
+          as: 'ownedFields',
+          attributes: ['id', 'name', 'is_verified'],
+          required: false
+        }],
+        attributes: ['id', 'name', 'email', 'package_type', 'package_expire_date', 'package_purchase_date'],
+        order: [['package_expire_date', 'ASC']]
+      });
+
+      // Fields có owner với gói hết hạn nhưng vẫn verified
+      const problematicFields = await Field.findAll({
+        where: { is_verified: true },
+        include: [{
+          model: User,
+          as: 'owner',
+          where: {
+            [Op.or]: [
+              { package_type: 'none' },
+              { package_expire_date: { [Op.lt]: new Date() } }
+            ]
+          },
+          attributes: ['id', 'name', 'package_type', 'package_expire_date']
+        }],
+        attributes: ['id', 'name', 'is_verified', 'created_at']
+      });
+
+      const reportData = {
+        summary: {
+          totalUsers,
+          usersWithPackages,
+          activePackages,
+          expiredPackages,
+          problematicFields: problematicFields.length
+        },
+        details: {
+          usersWithExpiredPackages: usersWithExpiredPackages.map(user => ({
+            ...user.toJSON(),
+            fieldsCount: user.ownedFields ? user.ownedFields.length : 0,
+            verifiedFieldsCount: user.ownedFields ? user.ownedFields.filter(f => f.is_verified).length : 0
+          })),
+          problematicFields
+        },
+        generatedAt: new Date().toISOString()
+      };
+
+      return successResponse(res, reportData, 'Báo cáo trạng thái gói dịch vụ');
+    } catch (error) {
+      console.error('Error in getPackageStatusReport:', error);
+      return errorResponse(res, 'Có lỗi xảy ra khi tạo báo cáo', 500);
+    }
+  }
 }
 
 module.exports = new AdminController();

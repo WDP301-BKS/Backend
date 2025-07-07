@@ -120,6 +120,11 @@ const startServer = async () => {
     const cleanupInterval = dbOptimizer.startPeriodicCleanup();
     logger.info('Started periodic cleanup for expired bookings');
     
+    // Initialize cron jobs
+    const { initCronJobs } = require('./utils/cronJobs');
+    initCronJobs();
+    logger.info('Cron jobs initialized successfully');
+    
     // Handle graceful shutdown
     process.on('SIGTERM', () => {
       logger.info('SIGTERM received, shutting down gracefully');
