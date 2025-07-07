@@ -799,10 +799,29 @@ class PaymentController {
             await transaction.rollback();
             return;
           }
+          
+          // Tính toán ngày hết hạn mới
+          let newExpireDate;
+          const today = new Date();
+          
+          // Nếu người dùng đã có gói và chưa hết hạn (gia hạn sớm)
+          if (user.package_expire_date && new Date(user.package_expire_date) > today) {
+            // Cộng dồn thời gian vào ngày hết hạn hiện tại
+            newExpireDate = new Date(user.package_expire_date);
+          } else {
+            // Tính từ ngày hiện tại nếu chưa có gói hoặc đã hết hạn
+            newExpireDate = new Date();
+          }
+          
+          // Thêm thời gian của gói mới
+          const months = packageType === 'premium' ? 6 : 1;
+          newExpireDate.setMonth(newExpireDate.getMonth() + months);
+          
           // Cập nhật thông tin package cho user
           await user.update({
             package_type: packageType,
-            package_purchase_date: new Date()
+            package_purchase_date: new Date(),
+            package_expire_date: newExpireDate
           }, { transaction });
           logger.info('User package updated successfully:', userId);
           await transaction.commit();
@@ -2304,6 +2323,7 @@ class PaymentController {
         return res.status(401).json(responseFormatter.error({
           code: 'UNAUTHORIZED',
           message: 'Bạn cần đăng nhập để mua gói dịch vụ'
+       
         }));
       }
       const { packageType, return_url, cancel_url } = req.body;
@@ -2357,6 +2377,72 @@ class PaymentController {
       return res.status(500).json(responseFormatter.error({
         code: 500,
         message: error.message
+      }));
+    }
+  }
+
+  // Get package status for current user
+  async getPackageStatus(req, res) {
+    try {
+      const userId = req.user.id;
+      
+      const user = await User.findByPk(userId, {
+        attributes: ['id', 'package_type', 'package_expire_date', 'package_purchase_date'],
+        include: [{
+          model: Field,
+          as: 'ownedFields',
+          attributes: ['id', 'is_verified'],
+          required: false
+        }]
+      });
+
+      if (!user) {
+        return res.status(404).json(responseFormatter.error({
+          code: 'USER_NOT_FOUND',
+          message: 'Không tìm thấy thông tin người dùng'
+        }));
+      }
+
+      const packageType = user.package_type || 'none';
+      const hasPackage = packageType !== 'none';
+      const expireDate = user.package_expire_date ? new Date(user.package_expire_date) : null;
+      const purchaseDate = user.package_purchase_date ? new Date(user.package_purchase_date) : null;
+
+      let packageStatus = {
+        hasPackage,
+        packageType,
+        isExpired: false,
+        isExpiringSoon: false,
+        daysUntilExpiry: 0,
+        expireDate: expireDate ? expireDate.toISOString() : null,
+        purchaseDate: purchaseDate ? purchaseDate.toISOString() : null,
+        fieldsAffected: 0
+      };
+
+      if (hasPackage && expireDate) {
+        const now = new Date();
+        const isExpired = expireDate < now;
+        const daysUntilExpiry = Math.ceil((expireDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        const isExpiringSoon = !isExpired && daysUntilExpiry <= 7;
+
+        // Đếm số sân bị ảnh hưởng
+        const fieldsAffected = user.ownedFields ? user.ownedFields.length : 0;
+
+        packageStatus = {
+          ...packageStatus,
+          isExpired,
+          isExpiringSoon,
+          daysUntilExpiry: Math.max(0, daysUntilExpiry),
+          fieldsAffected
+        };
+      }
+
+      return res.json(responseFormatter.success(packageStatus));
+    } catch (error) {
+      logger.error('Error in getPackageStatus:', error);
+      return res.status(500).json(responseFormatter.error({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Đã có lỗi xảy ra khi lấy thông tin gói dịch vụ'
       }));
     }
   }

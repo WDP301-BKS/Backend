@@ -92,6 +92,10 @@ const User = sequelize.define('user', {
       type: DataTypes.DATE,
       allowNull: true
   },
+  package_expire_date: {
+      type: DataTypes.DATE,
+      allowNull: true
+  },
   business_license_image: {
       type: DataTypes.TEXT,
       allowNull: true,

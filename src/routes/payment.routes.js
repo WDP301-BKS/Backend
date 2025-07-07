@@ -48,4 +48,7 @@ router.post('/booking/:bookingId/sync', PaymentController.syncPaymentStatus.bind
 // Create payment intent for package purchase
 router.post('/create-package-payment', authMiddleware, PaymentController.createPackagePayment.bind(PaymentController));
 
+// Get package status for current user
+router.get('/package-status', authMiddleware, PaymentController.getPackageStatus.bind(PaymentController));
+
 module.exports = router;
