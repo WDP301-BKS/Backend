@@ -17,9 +17,13 @@ exports.getPaginationParams = (query, options = {}) => {
     maxLimit = 100
   } = options;
   
+  // Handle array parameters from duplicate query params
+  const rawPage = Array.isArray(query.page) ? query.page[query.page.length - 1] : query.page;
+  const rawLimit = Array.isArray(query.limit) ? query.limit[query.limit.length - 1] : query.limit;
+  
   // Parse page and limit params, with defaults
-  let page = parseInt(query.page, 10) || defaultPage;
-  let limit = parseInt(query.limit, 10) || defaultLimit;
+  let page = parseInt(rawPage, 10) || defaultPage;
+  let limit = parseInt(rawLimit, 10) || defaultLimit;
   
   // Ensure page is at least 1
   page = Math.max(1, page);

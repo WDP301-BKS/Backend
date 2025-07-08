@@ -6,6 +6,9 @@ const dbOptimizer = require('../utils/dbOptimizer');
 const retryMechanism = require('../utils/retryMechanism');
 const performanceMonitor = require('../utils/performanceMonitorNew');
 const { emitBookingStatusUpdate, emitBookingPaymentUpdate, emitBookingEvent } = require('../config/socket.config');
+// Import centralized services
+const RealTimeEventService = require('../services/shared/realTimeEventService');
+const TimeSlotService = require('../services/shared/timeSlotService');
 
 // Get field availability for a specific date with optimized performance
 const getFieldAvailability = async (req, res) => {
@@ -177,7 +180,7 @@ const createBooking = async (req, res) => {
     }
 };
 
-// Get user's bookings (for authenticated users)
+// Get user's bookings with pagination (optimized)
 const getUserBookings = async (req, res) => {
     const operationId = performanceMonitor.startOperation('get_user_bookings', {
         type: 'booking_lookup',
@@ -194,15 +197,123 @@ const getUserBookings = async (req, res) => {
             }));
         }
 
-        // Use optimized batch lookup for user bookings
-        const bookings = await retryMechanism.executeDatabaseOperation(
-            () => dbOptimizer.getUserBookingsOptimized(userId),
-            'user_bookings_lookup'
-        );
+        // Extract pagination parameters - handle arrays from duplicate query params
+        const rawPage = Array.isArray(req.query.page) ? req.query.page[req.query.page.length - 1] : req.query.page;
+        const rawLimit = Array.isArray(req.query.limit) ? req.query.limit[req.query.limit.length - 1] : req.query.limit;
+        const page = Math.max(1, parseInt(rawPage) || 1);
+        const limit = Math.min(parseInt(rawLimit) || 20, 100);
+        const offset = (page - 1) * limit;
+        
+        // Extract filters
+        const { 
+            status: rawStatus, 
+            search: rawSearch, 
+            startDate: rawStartDate, 
+            endDate: rawEndDate, 
+            sortBy: rawSortBy = 'created_at', 
+            sortOrder: rawSortOrder = 'DESC' 
+        } = req.query;
 
-        performanceMonitor.endOperation(operationId, { success: true, bookingCount: bookings.length });
+        // Handle duplicate query parameters (arrays) by taking the last value
+        const status = Array.isArray(rawStatus) ? rawStatus[rawStatus.length - 1] : rawStatus;
+        const search = Array.isArray(rawSearch) ? rawSearch[rawSearch.length - 1] : rawSearch;
+        const startDate = Array.isArray(rawStartDate) ? rawStartDate[rawStartDate.length - 1] : rawStartDate;
+        const endDate = Array.isArray(rawEndDate) ? rawEndDate[rawEndDate.length - 1] : rawEndDate;
+        const sortBy = Array.isArray(rawSortBy) ? rawSortBy[rawSortBy.length - 1] : rawSortBy;
+        const sortOrder = Array.isArray(rawSortOrder) ? rawSortOrder[rawSortOrder.length - 1] : rawSortOrder;
 
-        return res.json(responseFormatter.success(bookings));
+        // Build where conditions
+        const whereConditions = { user_id: userId };
+        
+        if (status && status !== 'all') {
+            whereConditions.status = status;
+        }
+        
+        if (startDate && endDate) {
+            whereConditions.booking_date = {
+                [Op.between]: [startDate, endDate]
+            };
+        }
+
+        // Build search conditions
+        let searchConditions = {};
+        if (search && search.trim()) {
+            const searchTerm = search.trim();
+            searchConditions = {
+                [Op.or]: [
+                    { id: { [Op.iLike]: `%${searchTerm}%` } },
+                    {
+                        booking_metadata: {
+                            fieldName: { [Op.iLike]: `%${searchTerm}%` }
+                        }
+                    }
+                ]
+            };
+        }
+
+        const finalWhereConditions = {
+            [Op.and]: [
+                whereConditions,
+                ...(Object.keys(searchConditions).length ? [searchConditions] : [])
+            ]
+        };
+
+        // Get total count and bookings in parallel
+        const [totalCount, bookings] = await Promise.all([
+            Booking.count({ where: finalWhereConditions }),
+            retryMechanism.executeDatabaseOperation(
+                () => Booking.findAll({
+                    where: finalWhereConditions,
+                    include: [
+                        {
+                            model: TimeSlot,
+                            as: 'timeSlots',
+                            attributes: ['id', 'start_time', 'end_time', 'date'],
+                            include: [{
+                                model: SubField,
+                                as: 'subfield',
+                                attributes: ['id', 'name', 'field_type'], // Changed from 'type' to 'field_type'
+                                include: [{
+                                    model: Field,
+                                    as: 'field',
+                                    attributes: ['id', 'name', 'location_id', 'images1'], // Added images1
+                                    include: [{
+                                        model: Location,
+                                        as: 'location',
+                                        attributes: ['id', 'address_text', 'city', 'district']
+                                    }]
+                                }]
+                            }]
+                        }
+                    ],
+                    order: [[sortBy, String(sortOrder).toUpperCase()]],
+                    limit,
+                    offset
+                }),
+                'user_bookings_lookup'
+            )
+        ]);
+
+        const totalPages = Math.ceil(totalCount / limit);
+
+        performanceMonitor.endOperation(operationId, { 
+            success: true, 
+            bookingCount: bookings.length,
+            totalCount,
+            page 
+        });
+
+        return res.json(responseFormatter.success({
+            bookings,
+            pagination: {
+                page,
+                limit,
+                total: totalCount,
+                totalPages,
+                hasNext: page < totalPages,
+                hasPrev: page > 1
+            }
+        }));
 
     } catch (error) {
         console.error('Error in getUserBookings:', error);
@@ -370,35 +481,14 @@ const cancelBooking = async (req, res) => {
         // - Email notifications are only sent for maintenance-related cancellations (see cancelBookingForMaintenance)
         console.log(`📧 Email policy: No email sent for booking cancellation (status: ${booking.status})`);
 
-        // Emit real-time notifications for booking cancellation
+        // Emit real-time notifications for booking cancellation using centralized service
         try {
-            // Emit booking status update
-            emitBookingStatusUpdate(booking.id, {
-                status: 'cancelled',
-                payment_status: needsStripeRefund ? 'refunded' : 'cancelled',
-                userId: booking.user_id,
-                bookingId: booking.id,
+            await RealTimeEventService.emitBookingCancelled(booking.id, {
+                reason: reason,
                 refundAmount: refundAmount,
-                cancellationReason: reason,
-                timestamp: new Date().toISOString(),
-                message: needsStripeRefund 
-                    ? 'Booking cancelled and refund processed'
-                    : 'Booking cancelled successfully'
-            });
-
-            // Emit general booking event for broader notifications
-            emitBookingEvent('booking_cancelled', booking.id, {
                 userId: booking.user_id,
-                bookingId: booking.id,
-                status: 'cancelled',
-                payment_status: needsStripeRefund ? 'refunded' : 'cancelled',
-                refundAmount: refundAmount,
-                wasStripeRefund: needsStripeRefund,
-                timestamp: new Date().toISOString(),
-                refresh_needed: true, // Flag để frontend biết cần refresh
-                message: needsStripeRefund 
-                    ? 'Your booking has been cancelled and refund is being processed'
-                    : 'Your booking has been cancelled successfully'
+                paymentStatus: needsStripeRefund ? 'refunded' : 'cancelled',
+                wasStripeRefund: needsStripeRefund
             });
 
             console.log('✅ Real-time notifications sent for booking cancellation:', booking.id);
@@ -550,18 +640,19 @@ const getBookingStats = async (req, res) => {
 // Test email functionality - For development/testing purposes only
 const testEmail = async (req, res) => {
     try {
-        const { sendBookingConfirmationEmail, sendOwnerBookingNotificationEmail } = require('../utils/emailService');
+        // Sử dụng real email service - đã xác nhận hoạt động
+        const { sendBookingConfirmationEmail, sendOwnerBookingNotificationEmail } = require('../utils/emailService.js');
         
         // Mock booking details for testing
         const mockBookingDetails = {
-            fieldName: 'Sân bóng ABC',
-            customerName: 'Nguyễn Văn A',
-            customerEmail: 'customer@example.com',
-            customerPhone: '0123456789',
-            date: 'Thứ Hai, 17 tháng 6, 2025',
-            startTime: '08:00',
-            endTime: '10:00',
-            totalAmount: '500.000 ₫'
+            fieldName: 'Sân Bóng Thống Nhất',
+            customerName: 'Trung Trực Lê',
+            customerEmail: 'aeskychung@gmail.com',
+            customerPhone: '+84912333112',
+            date: 'Thứ Hai, 8 tháng 7, 2025',
+            startTime: '10:00',
+            endTime: '11:00',
+            totalAmount: '1.200.000 ₫'
         };
 
         const { type, email } = req.body;
@@ -586,10 +677,11 @@ const testEmail = async (req, res) => {
         }
 
         return res.json(responseFormatter.success({
-            message: 'Test email sent successfully',
+            message: 'Test email sent successfully via Gmail SMTP',
             type,
             email,
-            result
+            result,
+            note: 'Email sent using real Gmail SMTP service. Check recipient inbox.'
         }));
 
     } catch (error) {
@@ -764,7 +856,7 @@ const getFieldAvailabilityWithPricing = async (req, res) => {
             attributes: ['id', 'name', 'field_type']
         });
 
-        // Enhance unavailable slots with pricing information
+        // Enhance unavailable slots with pricing and payment status information
         const unavailableSlotsWithPricing = availabilityResult.unavailableSlots.map(slot => {
             const hour = parseInt(slot.start_time.split(':')[0]);
             
@@ -777,12 +869,23 @@ const getFieldAvailabilityWithPricing = async (req, res) => {
             const multiplier = applicableRule ? applicableRule.multiplier : 1.0;
             const finalPrice = Math.round(basePrice * multiplier);
 
+            // Determine display status
+            const displayStatus = dbOptimizer.getSlotDisplayStatus(slot);
+            
+            // Check if payment pending has expired
+            const isExpired = displayStatus === 'payment_pending' && 
+                            dbOptimizer.isPaymentPendingExpired(slot.booking_date);
+
             return {
                 ...slot,
                 base_price: basePrice,
                 peak_hour_multiplier: multiplier,
                 calculated_price: finalPrice,
-                is_peak_hour: multiplier > 1.0
+                is_peak_hour: multiplier > 1.0,
+                display_status: displayStatus,
+                is_payment_expired: isExpired,
+                payment_expires_at: displayStatus === 'payment_pending' && slot.booking_date ? 
+                    new Date(new Date(slot.booking_date).getTime() + 10 * 60 * 1000).toISOString() : null
             };
         });
 

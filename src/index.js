@@ -115,10 +115,10 @@ const startServer = async () => {
     await syncModels();
     logger.info('Models synchronized with database');
     
-    // Start periodic cleanup for expired bookings
-    const dbOptimizer = require('./utils/dbOptimizer');
-    const cleanupInterval = dbOptimizer.startPeriodicCleanup();
-    logger.info('Started periodic cleanup for expired bookings');
+    // Initialize PaymentTimeoutService for handling expired bookings
+    const PaymentTimeoutService = require('./services/paymentTimeoutService');
+    PaymentTimeoutService.init();
+    logger.info('PaymentTimeoutService initialized for expired bookings cleanup');
     
     // Initialize cron jobs
     const { initCronJobs } = require('./utils/cronJobs');
@@ -128,13 +128,13 @@ const startServer = async () => {
     // Handle graceful shutdown
     process.on('SIGTERM', () => {
       logger.info('SIGTERM received, shutting down gracefully');
-      clearInterval(cleanupInterval);
+      // PaymentTimeoutService will be cleaned up automatically when process exits
       process.exit(0);
     });
     
     process.on('SIGINT', () => {
       logger.info('SIGINT received, shutting down gracefully');
-      clearInterval(cleanupInterval);
+      // PaymentTimeoutService will be cleaned up automatically when process exits
       process.exit(0);
     });
     

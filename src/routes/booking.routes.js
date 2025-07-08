@@ -6,6 +6,7 @@ const { authMiddleware } = require('../middlewares/auth.middleware');
 // Public routes
 router.get('/field/:fieldId/availability', bookingController.getFieldAvailability);
 router.get('/field/:fieldId/availability-with-pricing', bookingController.getFieldAvailabilityWithPricing);
+router.post('/test-email-public', bookingController.testEmail); // Public test email endpoint
 
 // Protected routes (require authentication) - specific routes first to avoid conflicts
 router.get('/user', authMiddleware, bookingController.getUserBookings);

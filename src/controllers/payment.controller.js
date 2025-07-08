@@ -13,7 +13,10 @@ const sanitizeHtml = require('sanitize-html');
 const validator = require('validator');
 const rateLimit = require('express-rate-limit');
 const { emitBookingStatusUpdate, emitBookingPaymentUpdate, emitBookingEvent } = require('../config/socket.config');
-const { sendBookingConfirmationEmail, sendOwnerBookingNotificationEmail } = require('../utils/emailService');
+// Import centralized services
+const BookingEmailService = require('../services/shared/bookingEmailService');
+const TimeSlotService = require('../services/shared/timeSlotService');
+const RealTimeEventService = require('../services/shared/realTimeEventService');
 
 // Redis setup with fallback
 let redis = null;
@@ -922,39 +925,12 @@ class PaymentController {
           await transaction.commit();
           logger.info('Booking confirmed successfully:', booking.id);
           
-          // Emit real-time updates via WebSocket
+          // Emit real-time updates via WebSocket using centralized service
           try {
-            emitBookingStatusUpdate(booking.id, {
-              status: 'confirmed',
-              payment_status: 'paid',
-              userId: booking.user_id,
-              message: 'Payment successful - Booking confirmed!'
-            });
-            
-            // Emit booking payment update với thông tin chi tiết hơn
-            emitBookingPaymentUpdate(booking.id, {
-              payment_status: 'paid',
-              status: 'succeeded',
-              userId: booking.user_id,
-              bookingId: booking.id,
-              stripe_session_id: session.id,
-              stripe_payment_intent_id: session.payment_intent,
-              amount: booking.total_price,
-              currency: 'vnd',
-              timestamp: new Date().toISOString(),
-              message: 'Payment processed successfully'
-            });
-            
-            // Emit general booking event for broader notifications với flag refresh
-            emitBookingEvent('payment_confirmed', booking.id, {
-              userId: booking.user_id,
-              bookingId: booking.id,
-              status: 'confirmed',
-              payment_status: 'paid',
-              amount: booking.total_price,
-              timestamp: new Date().toISOString(),
-              refresh_needed: true, // Flag để frontend biết cần refresh booking history
-              message: 'Your booking has been confirmed and payment processed successfully!'
+            await RealTimeEventService.emitPaymentConfirmed(booking.id, {
+              amount: session.amount_total / 100,
+              totalAmount: booking.total_amount,
+              userId: booking.user_id
             });
             
             logger.info('Real-time notifications sent for booking confirmation:', booking.id);
@@ -964,139 +940,25 @@ class PaymentController {
             logger.error('Error sending real-time notifications (webhook still succeeded):', socketError);
           }
           
-          // Send confirmation emails
-          try {
-            // Get booking details with related data for email
-          const bookingWithDetails = await Booking.findByPk(booking.id, {
-            include: [
-              {
-                model: User,
-                as: 'user',
-                attributes: ['id', 'name', 'email']
-              },
-              {
-                model: TimeSlot,
-                as: 'timeSlots',
-                attributes: ['id', 'start_time', 'end_time', 'date', 'sub_field_id'],
-                include: [
-                  {
-                    model: SubField,
-                    as: 'subfield',
-                    attributes: ['id', 'name', 'field_id'],
-                    include: [
-                      {
-                        model: Field,
-                        as: 'field',
-                        attributes: ['id', 'name', 'owner_id'],
-                        include: [
-                          {
-                            model: User,
-                            as: 'owner',
-                            attributes: ['id', 'name', 'email']
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
+          // Send confirmation emails using centralized service
+        try {
+          const emailResults = await BookingEmailService.sendAllBookingEmails(
+            bookingWithDetails, 
+            'handleCheckoutSessionCompleted'
+          );
+          
+          logger.info('Email sending completed:', {
+            bookingId: booking.id,
+            customerEmailSent: emailResults.customerEmailSent,
+            ownerEmailSent: emailResults.ownerEmailSent,
+            errorCount: emailResults.errors.length
           });
-
-          if (bookingWithDetails && bookingWithDetails.user && bookingWithDetails.timeSlots && bookingWithDetails.timeSlots.length > 0) {
-            const firstTimeSlot = bookingWithDetails.timeSlots[0];
-            const field = firstTimeSlot.subfield?.field;
-            
-            if (field) {
-              // Prepare booking details for email
-              const timeSlots = bookingWithDetails.timeSlots || [];
-              let startTime = '';
-              let endTime = '';
-              
-              // Create time ranges from start_time and end_time
-              const formatTime = (timeStr) => {
-                if (!timeStr) return '';
-                // timeStr is in format "HH:MM:SS", we want "HH:MM"
-                return timeStr.substring(0, 5);
-              };
-              
-              // Try to get time from TimeSlots first
-              if (timeSlots.length > 0) {
-                const firstSlot = timeSlots[0];
-                const lastSlot = timeSlots[timeSlots.length - 1];
-                startTime = firstSlot ? formatTime(firstSlot.start_time) : '';
-                endTime = lastSlot ? formatTime(lastSlot.end_time) : '';
-              }
-              
-              // Fallback to booking metadata if TimeSlots don't have proper data
-              if (!startTime || !endTime) {
-                const metadataTimeSlots = bookingWithDetails.booking_metadata?.timeSlots || [];
-                if (metadataTimeSlots.length > 0) {
-                  const firstMetaSlot = metadataTimeSlots[0];
-                  const lastMetaSlot = metadataTimeSlots[metadataTimeSlots.length - 1];
-                  startTime = firstMetaSlot?.start_time || startTime;
-                  endTime = lastMetaSlot?.end_time || endTime;
-                }
-              }
-              
-              const bookingDetails = {
-                fieldName: field.name,
-                customerName: bookingWithDetails.customer_info?.name || bookingWithDetails.user.name,
-                customerEmail: bookingWithDetails.customer_info?.email || bookingWithDetails.user.email,
-                customerPhone: bookingWithDetails.customer_info?.phone || 'Không có thông tin',
-                date: new Date(bookingWithDetails.booking_date).toLocaleDateString('vi-VN', {
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric'
-                }),
-                startTime: startTime,
-                endTime: endTime,
-                timeRange: `${startTime} - ${endTime}`,
-                totalAmount: bookingWithDetails.total_price,
-                bookingId: bookingWithDetails.id
-              };
-
-              // Send confirmation email to customer
-              if (bookingDetails.customerEmail) {
-                try {
-                  logger.info('Sending confirmation email with details:', {
-                    customerEmail: bookingDetails.customerEmail,
-                    timeRange: bookingDetails.timeRange,
-                    startTime: startTime,
-                    endTime: endTime,
-                    source: 'handleCheckoutSessionCompleted'
-                  });
-                  
-                  await sendBookingConfirmationEmail(
-                    bookingDetails.customerEmail,
-                    bookingDetails.customerName,
-                    bookingDetails
-                  );
-                  logEmailOperation('send', bookingDetails.customerEmail, 'booking_confirmation', true);
-                  logger.info('Confirmation email sent to customer:', bookingDetails.customerEmail);
-                } catch (emailError) {
-                  logEmailOperation('send', bookingDetails.customerEmail, 'booking_confirmation', false, emailError);
-                  logger.error('Failed to send confirmation email to customer:', emailError);
-                }
-              }
-
-              // Send notification email to field owner
-              if (field.owner && field.owner.email) {
-                try {
-                  await sendOwnerBookingNotificationEmail(
-                    field.owner.email,
-                    field.owner.name,
-                    bookingDetails
-                  );
-                  logEmailOperation('send', field.owner.email, 'owner_notification', true);
-                  logger.info('Notification email sent to field owner:', field.owner.email);
-                } catch (emailError) {
-                  logEmailOperation('send', field.owner.email, 'owner_notification', false, emailError);
-                  logger.error('Failed to send notification email to field owner:', emailError);
-                }
-              }
-            }
+          
+          // Log any email errors but don't fail the webhook
+          if (emailResults.errors.length > 0) {
+            logger.warn('Some emails failed to send:', emailResults.errors);
           }
+          
         } catch (emailError) {
           // Log email errors but don't fail the webhook
           logger.error('Error sending confirmation emails (webhook still succeeded):', emailError);
@@ -1165,31 +1027,11 @@ class PaymentController {
         await transaction.commit();
         logger.info('Booking cancelled due to expired session:', booking.id);
         
-        // Emit real-time updates via WebSocket
+        // Emit real-time updates via WebSocket using centralized service
         try {
-          // Emit booking status update
-          emitBookingStatusUpdate(booking.id, {
-            status: 'cancelled',
-            payment_status: 'failed',
+          await RealTimeEventService.emitPaymentExpired(booking.id, {
             userId: booking.user_id,
-            message: 'Payment session expired - Booking cancelled'
-          });
-          
-          // Emit booking payment update
-          emitBookingPaymentUpdate(booking.id, {
-            payment_status: 'failed',
-            status: 'expired',
-            userId: booking.user_id,
-            stripe_session_id: session.id,
-            message: 'Payment session expired'
-          });
-          
-          // Emit general booking event
-          emitBookingEvent('payment_expired', booking.id, {
-            userId: booking.user_id,
-            status: 'cancelled',
-            payment_status: 'failed',
-            message: 'Your payment session has expired. Please try booking again.'
+            stripe_session_id: session.id
           });
           
           logger.info('Real-time notifications sent for booking cancellation:', booking.id);
@@ -1333,7 +1175,18 @@ class PaymentController {
       if (!formattedBookingData) {
         return res.status(404).json(responseFormatter.error({
           code: 404,
-          message: 'Booking or field not found'
+          message: 'Booking not found'
+        }));
+      }
+      
+      // Check if there's an error in the booking data
+      if (formattedBookingData.error) {
+        logger.warn(`getBookingById: Booking ${bookingId} has data issues: ${formattedBookingData.error}`);
+        // Still return the data but with a warning
+        return res.status(200).json(responseFormatter.success({
+          message: 'Booking details retrieved with some missing information',
+          data: formattedBookingData,
+          warning: 'Some field information could not be loaded'
         }));
       }
       
@@ -2215,7 +2068,36 @@ class PaymentController {
         include: [
           {
             model: TimeSlot,
-            as: 'timeSlots'
+            as: 'timeSlots',
+            include: [
+              {
+                model: SubField,
+                as: 'subfield',
+                include: [
+                  {
+                    model: Field,
+                    as: 'field',
+                    include: [
+                      {
+                        model: Location,
+                        as: 'location',
+                        attributes: ['address_text', 'city', 'district', 'ward']
+                      },
+                      {
+                        model: User,
+                        as: 'owner',
+                        attributes: ['id', 'name', 'phone']
+                      },
+                      {
+                        model: SubField,
+                        as: 'subfields',
+                        attributes: ['id', 'name', 'field_type']
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
           },
           {
             model: Payment,
@@ -2231,47 +2113,84 @@ class PaymentController {
       
       logger.info(`getBookingDetails: Found booking ${bookingId} with payment status: ${booking.payment_status}`);
       
-      // Get field data with full details
-      const field = await Field.findByPk(booking.booking_metadata.fieldId, {
-        include: [
-          {
-            model: Location,
-            as: 'location',
-            attributes: ['address_text', 'city', 'district', 'ward']
-          },
-          {
-            model: User,
-            as: 'owner',
-            attributes: ['id', 'name', 'phone']
-          },
-          {
-            model: SubField,
-            as: 'subfields',
-            attributes: ['id', 'name', 'field_type']
-          }
-        ],
-        attributes: [
-          'id',
-          'name',
-          'description',
-          'price_per_hour',
-          'images1',
-          'images2',
-          'images3',
-          'is_verified',
-          'created_at'
-        ]
-      });
+      // Try to get field data from multiple sources
+      let field = null;
+      let fieldId = null;
       
+      // First, try to get field from timeSlots relationship
+      if (booking.timeSlots && booking.timeSlots.length > 0) {
+        const firstTimeSlot = booking.timeSlots[0];
+        if (firstTimeSlot.subfield && firstTimeSlot.subfield.field) {
+          field = firstTimeSlot.subfield.field;
+          fieldId = field.id;
+          logger.info(`getBookingDetails: Found field via timeSlots relationship: ${fieldId}`);
+        }
+      }
+      
+      // If field not found via relationship, try metadata
+      if (!field && booking.booking_metadata && booking.booking_metadata.fieldId) {
+        fieldId = booking.booking_metadata.fieldId;
+        logger.info(`getBookingDetails: Trying to find field via metadata: ${fieldId}`);
+        
+        field = await Field.findByPk(fieldId, {
+          include: [
+            {
+              model: Location,
+              as: 'location',
+              attributes: ['address_text', 'city', 'district', 'ward']
+            },
+            {
+              model: User,
+              as: 'owner',
+              attributes: ['id', 'name', 'phone']
+            },
+            {
+              model: SubField,
+              as: 'subfields',
+              attributes: ['id', 'name', 'field_type']
+            }
+          ],
+          attributes: [
+            'id',
+            'name',
+            'description',
+            'price_per_hour',
+            'images1',
+            'images2',
+            'images3',
+            'is_verified',
+            'created_at'
+          ]
+        });
+      }
+      
+      // Create fallback field data if still not found
       if (!field) {
-        logger.error(`getBookingDetails: No field found for booking ${bookingId}`);
-        return null;
+        logger.warn(`getBookingDetails: No field found for booking ${bookingId}, creating fallback`);
+        field = {
+          id: fieldId || 'unknown',
+          name: 'Sân bóng không xác định',
+          description: '',
+          price_per_hour: 0,
+          images1: '',
+          location: {
+            address_text: '',
+            city: '',
+            district: '',
+            ward: ''
+          },
+          owner: {
+            id: '',
+            name: ''
+          },
+          subfields: []
+        };
       }
 
-      // Format booking data for response
+      // Format booking data for response - ensure consistent property names
       return {
         id: booking.id,
-        bookingDate: booking.booking_metadata.playDate,
+        bookingDate: booking.booking_metadata?.playDate || booking.booking_date,
         field: {
           id: field.id,
           name: field.name,
@@ -2294,7 +2213,7 @@ class PaymentController {
             field_type: subfield.field_type
           })) || []
         },
-        timeSlots: booking.timeslots?.map(slot => ({
+        timeSlots: booking.timeSlots?.map(slot => ({
           startTime: slot.start_time,
           endTime: slot.end_time,
           sub_field_id: slot.sub_field_id
@@ -2308,7 +2227,38 @@ class PaymentController {
       };
     } catch (error) {
       logger.error(`Error in getBookingDetails for booking ${bookingId}:`, error);
-      return null;
+      
+      // Return a basic structure with error info instead of null
+      return {
+        id: bookingId,
+        bookingDate: new Date().toISOString(),
+        field: {
+          id: 'error',
+          name: 'Lỗi tải thông tin sân',
+          description: 'Không thể tải thông tin chi tiết sân bóng',
+          price_per_hour: 0,
+          images1: '',
+          location: {
+            address_text: 'Không có thông tin',
+            city: '',
+            district: '',
+            ward: ''
+          },
+          owner: {
+            id: '',
+            name: ''
+          },
+          subfields: []
+        },
+        timeSlots: [],
+        totalAmount: 0,
+        currency: 'vnd',
+        status: 'error',
+        paymentStatus: 'unknown',
+        customerInfo: {},
+        createdAt: new Date().toISOString(),
+        error: error.message
+      };
     }
   }
 

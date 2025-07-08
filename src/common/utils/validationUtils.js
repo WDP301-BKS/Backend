@@ -54,8 +54,12 @@ const isValidVietnamesePhone = (phone) => {
  * @returns {Object} Đối tượng chứa các tham số phân trang
  */
 const getPaginationParams = (query) => {
-  const page = parseInt(query.page) || 1;
-  const limit = parseInt(query.limit) || 10;
+  // Handle array parameters from duplicate query params
+  const rawPage = Array.isArray(query.page) ? query.page[query.page.length - 1] : query.page;
+  const rawLimit = Array.isArray(query.limit) ? query.limit[query.limit.length - 1] : query.limit;
+  
+  const page = parseInt(rawPage) || 1;
+  const limit = parseInt(rawLimit) || 10;
   const offset = (page - 1) * limit;
   
   return {
@@ -72,10 +76,14 @@ const getPaginationParams = (query) => {
  * @returns {Array} Mảng sắp xếp cho Sequelize
  */
 const getSortingParams = (query, defaultSortField = 'created_at') => {
-  const sortField = query.sortBy || defaultSortField;
-  const sortOrder = query.sortOrder?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+  // Handle array parameters from duplicate query params
+  const sortField = Array.isArray(query.sortBy) ? query.sortBy[query.sortBy.length - 1] : query.sortBy;
+  const sortOrder = Array.isArray(query.sortOrder) ? query.sortOrder[query.sortOrder.length - 1] : query.sortOrder;
   
-  return [[sortField, sortOrder]];
+  const field = sortField || defaultSortField;
+  const order = String(sortOrder || 'DESC').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+  
+  return [[field, order]];
 };
 
 module.exports = {

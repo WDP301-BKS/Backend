@@ -15,15 +15,14 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// Kiểm tra kết nối khi khởi động
-(async function verifyEmailConnection() {
-  try {
-    await transporter.verify();
+// Kiểm tra kết nối khi khởi động (không đồng bộ)
+transporter.verify()
+  .then(() => {
     console.log('Email service is ready to send emails');
-  } catch (error) {
+  })
+  .catch((error) => {
     console.error('Email service configuration error:', error);
-  }
-})();
+  });
 
 /**
  * Gửi email

@@ -12,8 +12,11 @@ const optionalAuth = (req, res, next) => {
   next();
 };
 
-// Create booking and payment intent together  
-router.post('/create-booking-payment', authMiddleware, PaymentController.createBookingWithPayment.bind(PaymentController));
+// Create booking and payment intent together
+router.post('/create-booking-payment', 
+  authMiddleware, 
+  PaymentController.createBookingWithPayment.bind(PaymentController)
+);
 
 // Create payment intent for existing booking
 router.post('/create-intent', optionalAuth, PaymentController.createPaymentIntent.bind(PaymentController));
