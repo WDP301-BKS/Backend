@@ -278,9 +278,11 @@ class PaymentService {
         const { 
           emitBookingStatusUpdate, 
           emitBookingPaymentUpdate, 
-          emitBookingEvent 
+          emitBookingEvent, 
+          emitNewNotification
         } = require('../config/socket.config');
-        
+        const notificationService = require('./notification.service');
+
         // Emit real-time updates
         emitBookingStatusUpdate(payment.booking_id, {
           status: 'confirmed',
@@ -288,7 +290,6 @@ class PaymentService {
           userId: payment.Booking.user_id,
           message: 'Payment completed successfully - Booking confirmed!'
         });
-        
         emitBookingPaymentUpdate(payment.booking_id, {
           payment_status: 'paid',
           status: 'succeeded',
@@ -296,9 +297,8 @@ class PaymentService {
           stripe_payment_intent_id: paymentIntent.id,
           message: 'Payment processed successfully via payment intent'
         });
-        
+
         logger.info('Real-time notifications sent for payment success:', payment.booking_id);
-        
       } catch (socketError) {
         logger.error('Error sending real-time notifications (payment still processed):', socketError);
       }
@@ -324,6 +324,7 @@ class PaymentService {
         return;
       }
 
+
       await payment.update({
         status: 'failed',
         stripe_status: paymentIntent.status,
@@ -335,6 +336,7 @@ class PaymentService {
         status: 'cancelled',
         payment_status: 'failed'
       });
+
 
       logger.info(`Payment failed for booking: ${payment.booking_id}`);
 
@@ -359,6 +361,7 @@ class PaymentService {
         return;
       }
 
+
       await payment.update({
         status: 'canceled',
         stripe_status: paymentIntent.status,
@@ -369,6 +372,7 @@ class PaymentService {
         status: 'cancelled',
         payment_status: 'failed'
       });
+
 
       logger.info(`Payment canceled for booking: ${payment.booking_id}`);
 
@@ -521,6 +525,7 @@ class PaymentService {
           enabled: true
         }
       });
+
 
       // Save payment record with session info
       const payment = await Payment.create({
