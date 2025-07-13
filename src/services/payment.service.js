@@ -17,6 +17,18 @@ const getStripe = () => {
 class PaymentService {
   
   /**
+   * Format amount to VND currency for display
+   * @private
+   */
+  formatCurrency(amount) {
+    return new Intl.NumberFormat('vi-VN', {
+      style: 'currency',
+      currency: 'VND',
+      minimumFractionDigits: 0
+    }).format(amount);
+  }
+
+  /**
    * Create Stripe Payment Intent
    */
   async createPaymentIntent(paymentData) {
@@ -135,15 +147,15 @@ class PaymentService {
       // Find payment record
       const payment = await Payment.findOne({
         where: { stripe_payment_intent_id: paymentIntentId },
-        include: [{ model: Booking }]
+        include: [{ model: Booking, as: 'booking' }]
       });
 
       logger.info(`Payment record found: ${payment ? 'YES' : 'NO'}`);
       if (payment) {
         logger.info(`Payment ID: ${payment.id}, Booking ID: ${payment.booking_id}`);
-        logger.info(`Booking association loaded: ${payment.Booking ? 'YES' : 'NO'}`);
-        if (payment.Booking) {
-          logger.info(`Booking details: ID=${payment.Booking.id}, Status=${payment.Booking.status}`);
+        logger.info(`Booking association loaded: ${payment.booking ? 'YES' : 'NO'}`);
+        if (payment.booking) {
+          logger.info(`Booking details: ID=${payment.booking.id}, Status=${payment.booking.status}`);
         } else {
           logger.error(`Booking association is missing for payment ${payment.id}`);
         }
@@ -250,7 +262,7 @@ class PaymentService {
     try {
       const payment = await Payment.findOne({
         where: { stripe_payment_intent_id: paymentIntent.id },
-        include: [{ model: Booking }]
+        include: [{ model: Booking, as: 'booking' }]
       });
 
       if (!payment) {
@@ -266,7 +278,7 @@ class PaymentService {
         webhook_received_at: new Date()
       });
 
-      await payment.Booking.update({
+      await payment.booking.update({
         status: 'confirmed',
         payment_status: 'paid'
       });
@@ -285,14 +297,14 @@ class PaymentService {
         emitBookingStatusUpdate(payment.booking_id, {
           status: 'confirmed',
           payment_status: 'paid',
-          userId: payment.Booking.user_id,
+          userId: payment.booking.user_id,
           message: 'Payment completed successfully - Booking confirmed!'
         });
         
         emitBookingPaymentUpdate(payment.booking_id, {
           payment_status: 'paid',
           status: 'succeeded',
-          userId: payment.Booking.user_id,
+          userId: payment.booking.user_id,
           stripe_payment_intent_id: paymentIntent.id,
           message: 'Payment processed successfully via payment intent'
         });
@@ -316,7 +328,7 @@ class PaymentService {
     try {
       const payment = await Payment.findOne({
         where: { stripe_payment_intent_id: paymentIntent.id },
-        include: [{ model: Booking }]
+        include: [{ model: Booking, as: 'booking' }]
       });
 
       if (!payment) {
@@ -331,7 +343,7 @@ class PaymentService {
         webhook_received_at: new Date()
       });
 
-      await payment.Booking.update({
+      await payment.booking.update({
         status: 'cancelled',
         payment_status: 'failed'
       });
@@ -351,7 +363,7 @@ class PaymentService {
     try {
       const payment = await Payment.findOne({
         where: { stripe_payment_intent_id: paymentIntent.id },
-        include: [{ model: Booking }]
+        include: [{ model: Booking, as: 'booking' }]
       });
 
       if (!payment) {
@@ -365,7 +377,7 @@ class PaymentService {
         webhook_received_at: new Date()
       });
 
-      await payment.Booking.update({
+      await payment.booking.update({
         status: 'cancelled',
         payment_status: 'failed'
       });
@@ -384,7 +396,7 @@ class PaymentService {
   async createRefund(paymentId, refundAmount, reason, refundPercentage = 100) {
     try {
       const payment = await Payment.findByPk(paymentId, {
-        include: [{ model: Booking }]
+        include: [{ model: Booking, as: 'booking' }]
       });
 
       if (!payment) {
@@ -414,7 +426,7 @@ class PaymentService {
         refund_reason: reason
       });
 
-      await payment.Booking.update({
+      await payment.booking.update({
         status: 'cancelled',
         payment_status: 'refunded'
       });
@@ -480,11 +492,31 @@ class PaymentService {
         throw new Error('Booking not found');
       }
 
-      // Create line items description
+      // Create line items description with enhanced details for better dashboard management
       const fieldName = field?.fieldName || field?.name || 'Sân bóng';
       const timeSlotText = booking_metadata.timeSlots
         .map(slot => `${slot.start_time}-${slot.end_time}`)
         .join(', ');
+      
+      // Format date for better readability
+      const formattedDate = new Date(booking_metadata.playDate).toLocaleDateString('vi-VN', {
+        weekday: 'short',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+
+      // Create enhanced product description for Stripe dashboard
+      const enhancedDescription = [
+        `🏟️ Đặt sân thể thao`,
+        `📅 ${formattedDate}`,
+        `⏰ ${timeSlotText}`,
+        `📍 ${fieldName}`,
+        `� ${this.formatCurrency(amount)}`,
+        `�👤 ${customer_info.name}`,
+        `📧 ${customer_info.email}`,
+        `🆔 Booking: ${booking_id}`
+      ].join('\n');
 
       // Create checkout session
       const session = await getStripe().checkout.sessions.create({
@@ -493,8 +525,8 @@ class PaymentService {
           price_data: {
             currency: currency,
             product_data: {
-              name: `Đặt sân "${fieldName}"`,
-              description: `Ngày: ${booking_metadata.playDate}\nGiờ: ${timeSlotText}`,
+              name: `⚽ BOOKING - ${fieldName} (${formattedDate})`,
+              description: enhancedDescription,
               images: field?.image_url ? [field.image_url] : [],
             },
             unit_amount: amountInCents,
@@ -508,12 +540,18 @@ class PaymentService {
         cancel_url: cancel_url,
         expires_at: Math.floor(Date.now() / 1000) + (30 * 60), // 30 minutes
         metadata: {
+          payment_type: 'field_booking', // Add payment type for easy filtering
           booking_id: booking_id,
           field_id: booking_metadata.fieldId,
+          field_name: fieldName,
           booking_date: booking_metadata.playDate,
+          time_slots_count: booking_metadata.timeSlots.length,
           customer_email: customer_info.email,
           customer_name: customer_info.name,
-          time_slots: JSON.stringify(booking_metadata.timeSlots)
+          time_slots: JSON.stringify(booking_metadata.timeSlots),
+          // Add additional identifiers for dashboard management
+          transaction_category: 'field_rental',
+          business_unit: 'sports_booking'
         },
         locale: 'vi',
         billing_address_collection: 'auto',

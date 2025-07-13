@@ -955,6 +955,10 @@ const cleanAddressString = (address) => {
   cleanedAddress = cleanedAddress
     // Loại bỏ dấu phẩy liền với chữ và thay bằng dấu phẩy + khoảng trắng
     .replace(/,([^\s])/g, ', $1')
+    // Loại bỏ khoảng trắng thừa trước dấu phẩy
+    .replace(/\s+,/g, ',')
+    // Đảm bảo có một khoảng trắng sau dấu phẩy
+    .replace(/,\s*/g, ', ')
     // Loại bỏ các ký tự đặc biệt không cần thiết
     .replace(/[`~!@#$%^&*()_|+=?;:'"><]/g, ' ')
     // Chuẩn hóa tiền tố phường/quận

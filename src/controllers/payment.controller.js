@@ -17,6 +17,7 @@ const { emitBookingStatusUpdate, emitBookingPaymentUpdate, emitBookingEvent } = 
 const BookingEmailService = require('../services/shared/bookingEmailService');
 const TimeSlotService = require('../services/shared/timeSlotService');
 const RealTimeEventService = require('../services/shared/realTimeEventService');
+const emailService = require('../utils/emailService');
 
 // Redis setup with fallback
 let redis = null;
@@ -127,9 +128,6 @@ class PaymentController {
         timestamp: new Date().toISOString(),
         receivedData: data
       }, null, 2));
-      
-      console.log('=== VALIDATION DEBUG ===');
-      console.log('Received data:', JSON.stringify(data, null, 2));
       const errors = [];
     
     // Validate required fields
@@ -210,27 +208,11 @@ class PaymentController {
         }
       }
     } catch (urlError) {
-      console.error('URL validation error:', urlError);
-      fs.writeFileSync('/tmp/url_validation_error.json', JSON.stringify({
-        error: urlError.message,
-        stack: urlError.stack
-      }, null, 2));
       errors.push('Lỗi xác thực URL');
     }
 
-    console.log('=== VALIDATION RESULT ===');
-    console.log('Errors found:', errors);
-    console.log('Number of errors:', errors.length);
-    
-    fs.writeFileSync('/tmp/validation_result.json', JSON.stringify({
-      timestamp: new Date().toISOString(),
-      errors: errors,
-      errorCount: errors.length
-    }, null, 2));
-    
     return errors;
     } catch (mainError) {
-      console.error('Main validation error:', mainError);
       fs.writeFileSync('/tmp/validation_main_error.json', JSON.stringify({
         error: mainError.message,
         stack: mainError.stack
@@ -252,7 +234,6 @@ class PaymentController {
    * Create booking and payment intent together
    */
   async createBookingWithPayment(req, res) {
-    console.log('createBookingWithPayment method called');
     logger.info('createBookingWithPayment method called');
     
     const operationId = performanceMonitor.startOperation('create_booking_with_payment', {
@@ -277,7 +258,6 @@ class PaymentController {
       const validationErrors = this.validateBookingData(req.body);
       if (validationErrors.length > 0) {
         logger.error('Booking validation errors:', validationErrors);
-        console.error('Booking validation errors:', validationErrors);
         return res.status(400).json(responseFormatter.error({ 
           code: 400, 
           message: 'Dữ liệu không hợp lệ',
@@ -305,7 +285,6 @@ class PaymentController {
       // Try to acquire lock with 30s timeout
       const locked = await this.acquireLock(lockKey, 30);
       if (!locked) {
-        console.log('Request already being processed, rejecting duplicate:', lockKey);
         return res.status(409).json(responseFormatter.error({ 
           code: 409, 
           message: 'Booking request already in progress' 
@@ -313,8 +292,6 @@ class PaymentController {
       }
 
       try {
-        console.log('Validation passed, checking field:', fieldId);
-        
         // Check if field exists with retry mechanism and fetch full info for metadata
         const field = await retryMechanism.executeDatabaseOperation(
           () => Field.findByPk(fieldId, {
@@ -942,26 +919,153 @@ class PaymentController {
           
           // Send confirmation emails using centralized service
         try {
-          const emailResults = await BookingEmailService.sendAllBookingEmails(
-            bookingWithDetails, 
-            'handleCheckoutSessionCompleted'
-          );
+          // Get full booking details for email
+          const bookingWithDetails = await this.getBookingDetails(booking.id);
           
-          logger.info('Email sending completed:', {
-            bookingId: booking.id,
-            customerEmailSent: emailResults.customerEmailSent,
-            ownerEmailSent: emailResults.ownerEmailSent,
-            errorCount: emailResults.errors.length
-          });
-          
-          // Log any email errors but don't fail the webhook
-          if (emailResults.errors.length > 0) {
-            logger.warn('Some emails failed to send:', emailResults.errors);
+          if (bookingWithDetails) {
+            const emailResults = await BookingEmailService.sendAllBookingEmails(
+              bookingWithDetails, 
+              'handleCheckoutSessionCompleted'
+            );
+            
+            logger.info('Email sending completed:', {
+              bookingId: String(booking.id), // Convert to string for proper logging
+              customerEmailSent: emailResults.customerEmailSent,
+              ownerEmailSent: emailResults.ownerEmailSent,
+              errorCount: emailResults.errors.length
+            });
+            
+            // Log any email errors but don't fail the webhook
+            if (emailResults.errors.length > 0) {
+              logger.warn('Some emails failed to send:', emailResults.errors);
+            }
+
+            // Fallback: If BookingEmailService failed to send emails, try direct email sending
+            if (!emailResults.customerEmailSent || !emailResults.ownerEmailSent) {
+              logger.info('Attempting fallback email sending for failed emails...');
+              
+              try {
+                // Get owner email from User table directly with safety checks
+                let field = null;
+                const fieldId = bookingWithDetails.field?.id || booking.booking_metadata?.fieldId;
+                
+                if (fieldId && fieldId !== 'error' && fieldId !== 'unknown' && validator.isUUID(fieldId)) {
+                  field = await Field.findByPk(fieldId, {
+                    include: [{
+                      model: User,
+                      as: 'owner',
+                      attributes: ['id', 'name', 'email']
+                    }]
+                  });
+                } else {
+                  logger.warn('Invalid fieldId for fallback email, skipping field lookup');
+                }
+
+                const ownerEmail = field?.owner?.email;
+                const customerEmail = booking.customer_info?.email;
+
+                // Send customer email if it failed
+                if (!emailResults.customerEmailSent && customerEmail) {
+                  try {
+                    const customerName = booking.customer_info?.name || 'Khách hàng';
+                    const transformedData = this.transformBookingDataForEmail(bookingWithDetails);
+                    await emailService.sendBookingConfirmationEmail(customerEmail, customerName, transformedData);
+                    logger.info('Fallback customer email sent successfully');
+                  } catch (customerEmailError) {
+                    logger.error('Fallback customer email failed:', customerEmailError.message);
+                  }
+                }
+
+                // Send owner email if it failed
+                if (!emailResults.ownerEmailSent && ownerEmail) {
+                  try {
+                    const ownerName = field?.owner?.name || 'Chủ sân';
+                    const transformedData = this.transformBookingDataForEmail(bookingWithDetails);
+                    await emailService.sendOwnerBookingNotificationEmail(ownerEmail, ownerName, transformedData);
+                    logger.info('Fallback owner email sent successfully');
+                  } catch (ownerEmailError) {
+                    logger.error('Fallback owner email failed:', ownerEmailError.message);
+                  }
+                }
+
+              } catch (fallbackError) {
+                logger.error('Fallback email process failed:', fallbackError.message);
+              }
+            }
+          } else {
+            logger.warn('Could not fetch booking details for email sending');
           }
           
         } catch (emailError) {
           // Log email errors but don't fail the webhook
           logger.error('Error sending confirmation emails (webhook still succeeded):', emailError);
+          
+          // Ultimate fallback: Try to send basic emails directly
+          try {
+            logger.info('Attempting ultimate fallback email sending...');
+            
+            const customerEmail = booking.customer_info?.email;
+            const metadata = booking.booking_metadata || {};
+            
+            // Try to get owner email
+            let ownerEmail = null;
+            if (metadata.fieldId && metadata.fieldId !== 'error' && metadata.fieldId !== 'unknown' && validator.isUUID(metadata.fieldId)) {
+              try {
+                const field = await Field.findByPk(metadata.fieldId, {
+                  include: [{
+                    model: User,
+                    as: 'owner',
+                    attributes: ['email']
+                  }]
+                });
+                ownerEmail = field?.owner?.email;
+              } catch (fieldError) {
+                logger.error('Error fetching field for owner email:', fieldError.message);
+              }
+            }
+
+            // Prepare basic booking data for emails
+            const basicBookingData = {
+              id: String(booking.id),
+              field: {
+                name: metadata.fieldName || 'Unknown Field',
+                location: {
+                  address_text: metadata.fieldLocation?.address || 'Unknown Location'
+                }
+              },
+              timeSlots: metadata.timeSlots || [],
+              totalAmount: booking.total_price,
+              customerInfo: booking.customer_info,
+              bookingDate: metadata.playDate || booking.created_at
+            };
+
+            // Send basic customer email
+            if (customerEmail) {
+              try {
+                const customerName = booking.customer_info?.name || 'Khách hàng';
+                const transformedData = this.transformBookingDataForEmail(basicBookingData);
+                await emailService.sendBookingConfirmationEmail(customerEmail, customerName, transformedData);
+                logger.info('Ultimate fallback customer email sent');
+              } catch (err) {
+                logger.error('Ultimate fallback customer email failed:', err.message);
+              }
+            }
+
+            // Send basic owner email
+            if (ownerEmail) {
+              try {
+                const ownerName = 'Chủ sân'; // Basic fallback name
+                const transformedData = this.transformBookingDataForEmail(basicBookingData);
+                await emailService.sendOwnerBookingNotificationEmail(ownerEmail, ownerName, transformedData);
+                logger.info('Ultimate fallback owner email sent');
+              } catch (err) {
+                logger.error('Ultimate fallback owner email failed:', err.message);
+              }
+            }
+
+          } catch (ultimateFallbackError) {
+            logger.error('Ultimate fallback email failed:', ultimateFallbackError.message);
+          }
         }
         }
         
@@ -1221,6 +1325,8 @@ class PaymentController {
         }));
       }
       
+      logger.info(`getBookingBySessionId: Looking for session ${sessionId}`);
+      
       // Find payment by session ID
       const payment = await Payment.findOne({
         where: { stripe_session_id: sessionId },
@@ -1237,6 +1343,7 @@ class PaymentController {
       });
       
       if (!payment || !payment.booking) {
+        logger.error(`getBookingBySessionId: Payment or booking not found for session ${sessionId}`);
         return res.status(404).json(responseFormatter.error({
           code: 404,
           message: 'Booking not found'
@@ -1244,28 +1351,56 @@ class PaymentController {
       }
       
       const booking = payment.booking;
-      const field = await Field.findByPk(booking.booking_metadata.fieldId);
+      logger.info(`getBookingBySessionId: Found booking ${booking.id} with metadata:`, booking.booking_metadata);
+      
+      // Get field with full location and owner details
+      const field = await Field.findByPk(booking.booking_metadata.fieldId, {
+        include: [
+          {
+            model: Location,
+            as: 'location',
+            attributes: ['address_text', 'city', 'district', 'ward']
+          },
+          {
+            model: User,
+            as: 'owner',
+            attributes: ['id', 'name', 'phone']
+          },
+          {
+            model: SubField,
+            as: 'subfields',
+            attributes: ['id', 'name', 'field_type']
+          }
+        ]
+      });
+      
+      // Fallback to metadata if field not found or incomplete
+      const metadata = booking.booking_metadata || {};
       
       const bookingDetails = {
         id: booking.id,
         bookingDate: booking.booking_date,
         field: {
-          id: field?.id || booking.booking_metadata.fieldId,
-          name: field?.name || 'Unknown Field',
-          description: field?.description || '',
+          id: field?.id || metadata.fieldId || booking.booking_metadata.fieldId,
+          name: field?.name || metadata.fieldName || 'Unknown Field',
+          description: field?.description || metadata.fieldDescription || '',
           price_per_hour: field?.price_per_hour || 0,
-          images1: field?.images1 || '',
+          images1: field?.images1 || metadata.fieldImages || '',
           location: {
-            address_text: field?.address_text || '',
-            city: field?.city || '',
-            district: field?.district || '',
-            ward: field?.ward || ''
+            address_text: field?.location?.address_text || metadata.fieldLocation?.address || '',
+            city: field?.location?.city || metadata.fieldLocation?.city || '',
+            district: field?.location?.district || metadata.fieldLocation?.district || '',
+            ward: field?.location?.ward || metadata.fieldLocation?.ward || ''
           },
           owner: {
-            id: field?.owner_id || '',
-            name: field?.owner_name || ''
+            id: field?.owner?.id || '',
+            name: field?.owner?.name || ''
           },
-          subfields: []
+          subfields: field?.subfields?.map(subfield => ({
+            id: subfield.id,
+            name: subfield.name,
+            field_type: subfield.field_type
+          })) || metadata.subFields || []
         },
         timeSlots: booking.timeSlots?.map(slot => ({
           startTime: slot.start_time,
@@ -1690,7 +1825,7 @@ class PaymentController {
                         source: 'syncPaymentStatus'
                       });
                       
-                      await sendBookingConfirmationEmail(
+                      await emailService.sendBookingConfirmationEmail(
                         bookingDetails.customerEmail,
                         bookingDetails.customerName,
                         bookingDetails
@@ -1706,7 +1841,7 @@ class PaymentController {
                   // Send notification email to field owner
                   if (field.owner && field.owner.email) {
                     try {
-                      await sendOwnerBookingNotificationEmail(
+                      await emailService.sendOwnerBookingNotificationEmail(
                         field.owner.email,
                         field.owner.name,
                         bookingDetails
@@ -2081,17 +2216,12 @@ class PaymentController {
                       {
                         model: Location,
                         as: 'location',
-                        attributes: ['address_text', 'city', 'district', 'ward']
+                        attributes: ['id', 'address_text', 'formatted_address', 'city', 'district', 'ward', 'country']
                       },
                       {
                         model: User,
                         as: 'owner',
-                        attributes: ['id', 'name', 'phone']
-                      },
-                      {
-                        model: SubField,
-                        as: 'subfields',
-                        attributes: ['id', 'name', 'field_type']
+                        attributes: ['id', 'name', 'phone', 'email']
                       }
                     ]
                   }
@@ -2121,9 +2251,40 @@ class PaymentController {
       if (booking.timeSlots && booking.timeSlots.length > 0) {
         const firstTimeSlot = booking.timeSlots[0];
         if (firstTimeSlot.subfield && firstTimeSlot.subfield.field) {
-          field = firstTimeSlot.subfield.field;
-          fieldId = field.id;
-          logger.info(`getBookingDetails: Found field via timeSlots relationship: ${fieldId}`);
+          fieldId = firstTimeSlot.subfield.field.id;
+          logger.info(`getBookingDetails: Found fieldId via timeSlots relationship: ${fieldId}`);
+          
+          // Load field with subfields
+          field = await Field.findByPk(fieldId, {
+            include: [
+              {
+                model: Location,
+                as: 'location',
+                attributes: ['id', 'address_text', 'formatted_address', 'city', 'district', 'ward', 'country']
+              },
+              {
+                model: User,
+                as: 'owner',
+                attributes: ['id', 'name', 'phone', 'email']
+              },
+              {
+                model: SubField,
+                as: 'subfields',
+                attributes: ['id', 'name', 'field_type']
+              }
+            ],
+            attributes: [
+              'id',
+              'name',
+              'description',
+              'price_per_hour',
+              'images1',
+              'images2',
+              'images3',
+              'is_verified',
+              'created_at'
+            ]
+          });
         }
       }
       
@@ -2137,12 +2298,12 @@ class PaymentController {
             {
               model: Location,
               as: 'location',
-              attributes: ['address_text', 'city', 'district', 'ward']
+              attributes: ['id', 'address_text', 'formatted_address', 'city', 'district', 'ward', 'country']
             },
             {
               model: User,
               as: 'owner',
-              attributes: ['id', 'name', 'phone']
+              attributes: ['id', 'name', 'phone', 'email']
             },
             {
               model: SubField,
@@ -2166,24 +2327,37 @@ class PaymentController {
       
       // Create fallback field data if still not found
       if (!field) {
-        logger.warn(`getBookingDetails: No field found for booking ${bookingId}, creating fallback`);
+        logger.warn(`getBookingDetails: No field found for booking ${bookingId}, creating fallback with metadata`);
+        
+        // Try to use metadata as fallback
+        const metadata = booking.booking_metadata || {};
         field = {
-          id: fieldId || 'unknown',
-          name: 'Sân bóng không xác định',
-          description: '',
+          id: null, // Use null instead of invalid UUID
+          name: metadata.fieldName || 'Sân bóng không xác định',
+          description: metadata.fieldDescription || '',
           price_per_hour: 0,
-          images1: '',
-          location: {
+          images1: metadata.fieldImages || '',
+          location: metadata.fieldLocation ? {
+            address_text: metadata.fieldLocation.address || '',
+            formatted_address: metadata.fieldLocation.formatted_address || metadata.fieldLocation.address || '',
+            city: metadata.fieldLocation.city || '',
+            district: metadata.fieldLocation.district || '',
+            ward: metadata.fieldLocation.ward || '',
+            country: metadata.fieldLocation.country || ''
+          } : {
             address_text: '',
+            formatted_address: '',
             city: '',
             district: '',
-            ward: ''
+            ward: '',
+            country: ''
           },
           owner: {
-            id: '',
-            name: ''
+            id: null,
+            name: '',
+            email: ''
           },
-          subfields: []
+          subfields: metadata.subFields || []
         };
       }
 
@@ -2199,13 +2373,16 @@ class PaymentController {
           images1: field.images1 || '',
           location: {
             address_text: field.location?.address_text || '',
+            formatted_address: field.location?.formatted_address || '',
             city: field.location?.city || '',
             district: field.location?.district || '',
-            ward: field.location?.ward || ''
+            ward: field.location?.ward || '',
+            country: field.location?.country || ''
           },
           owner: {
             id: field.owner?.id || '',
-            name: field.owner?.name || ''
+            name: field.owner?.name || '',
+            email: field.owner?.email || ''
           },
           subfields: field.subfields?.map(subfield => ({
             id: subfield.id,
@@ -2216,7 +2393,17 @@ class PaymentController {
         timeSlots: booking.timeSlots?.map(slot => ({
           startTime: slot.start_time,
           endTime: slot.end_time,
-          sub_field_id: slot.sub_field_id
+          start_time: slot.start_time, // Keep both formats for compatibility
+          end_time: slot.end_time,
+          sub_field_id: slot.sub_field_id,
+          subfieldId: slot.sub_field_id,
+          subfield: slot.subfield ? {
+            id: slot.subfield.id,
+            name: slot.subfield.name,
+            field_type: slot.subfield.field_type,
+            fieldType: slot.subfield.field_type
+          } : null,
+          date: booking.booking_metadata?.playDate || booking.booking_date
         })) || [],
         totalAmount: booking.total_price,
         currency: booking.payment?.currency || 'vnd',
@@ -2233,7 +2420,7 @@ class PaymentController {
         id: bookingId,
         bookingDate: new Date().toISOString(),
         field: {
-          id: 'error',
+          id: null, // Use null instead of 'error' to avoid UUID issues
           name: 'Lỗi tải thông tin sân',
           description: 'Không thể tải thông tin chi tiết sân bóng',
           price_per_hour: 0,
@@ -2245,8 +2432,9 @@ class PaymentController {
             ward: ''
           },
           owner: {
-            id: '',
-            name: ''
+            id: null,
+            name: '',
+            email: ''
           },
           subfields: []
         },
@@ -2289,7 +2477,57 @@ class PaymentController {
         basic: 599000,
         premium: 3099000
       };
+      
+      // Package information for better dashboard management
+      const PACKAGE_INFO = {
+        basic: {
+          name: 'Gói Cơ Bản',
+          features: 'Đăng sân cơ bản, Quản lý booking',
+          duration: '30 ngày'
+        },
+        premium: {
+          name: 'Gói Premium',
+          features: 'Đăng sân không giới hạn, Analytics, Priority support',
+          duration: '365 ngày'
+        }
+      };
+
       const amount = SERVICE_PLANS[packageType];
+      const packageDetails = PACKAGE_INFO[packageType];
+      
+      // Get user information for enhanced description
+      const user = await User.findByPk(userId, {
+        attributes: ['name', 'email', 'phone']
+      });
+      
+      if (!user) {
+        return res.status(404).json(responseFormatter.error({
+          code: 404,
+          message: 'User not found'
+        }));
+      }
+
+      // Format current date
+      const currentDate = new Date().toLocaleDateString('vi-VN', {
+        weekday: 'short',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+
+      // Create enhanced description for package purchase
+      const packageDescription = [
+        `💼 Mua gói dịch vụ`,
+        `📦 ${packageDetails.name}`,
+        `⏱️ Thời hạn: ${packageDetails.duration}`,
+        `✨ ${packageDetails.features}`,
+        `� ${new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', minimumFractionDigits: 0 }).format(amount)}`,
+        `�👤 ${user.name}`,
+        `📧 ${user.email}`,
+        `📅 ${currentDate}`,
+        `🆔 User: ${userId}`
+      ].join('\n');
+
       // Tạo session thanh toán Stripe (hoặc VNPay...)
       const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
       const session = await stripe.checkout.sessions.create({
@@ -2299,7 +2537,8 @@ class PaymentController {
             price_data: {
               currency: 'vnd',
               product_data: {
-                name: `Gói dịch vụ: ${packageType}`,
+                name: `💼 PACKAGE - ${packageDetails.name} (${packageDetails.duration})`,
+                description: packageDescription,
               },
               unit_amount: amount,
             },
@@ -2310,9 +2549,19 @@ class PaymentController {
         success_url: return_url || process.env.FRONTEND_URL + '/payment/success',
         cancel_url: cancel_url || process.env.FRONTEND_URL + '/payment/cancel',
         metadata: {
+          payment_type: 'service_package', // Add payment type for easy filtering
           type: 'package',
-          userId,
-          packageType
+          package_type: packageType,
+          package_name: packageDetails.name,
+          package_duration: packageDetails.duration,
+          user_id: userId,
+          user_name: user.name,
+          user_email: user.email,
+          purchase_date: currentDate,
+          // Add additional identifiers for dashboard management
+          transaction_category: 'service_subscription',
+          business_unit: 'package_sales',
+          amount_vnd: amount
         },
         client_reference_id: userId
       });
@@ -2399,6 +2648,7 @@ class PaymentController {
   }
 
   /**
+<<<<<<< Updated upstream
    * Calculate refund percentage based on cancellation time rules
    * @param {Date} bookingDate - The date/time of the booked slot
    * @param {Date} bookingCreatedAt - When the booking was created
@@ -2467,6 +2717,133 @@ class PaymentController {
       });
       return 0; // Default to no refund on error
     }
+  }
+
+  /**
+   * Transform booking data to format expected by emailService with enhanced field and location information
+   * @private
+   */
+  transformBookingDataForEmail(bookingData) {
+    console.log('🔄 TRANSFORM EMAIL DATA: Starting transformation');
+    console.log('📊 Input booking data keys:', Object.keys(bookingData || {}));
+    
+    // Extract field information with fallbacks
+    const field = bookingData.field || bookingData.Field || {};
+    const fieldName = field.name || bookingData.fieldName || 'Sân bóng không xác định';
+    
+    // Extract location information with multiple fallback options
+    const location = field.location || field.Location || bookingData.location || bookingData.fieldLocation || {};
+    console.log('📍 Location data:', location);
+    
+    // Build comprehensive address
+    let fieldAddress = '';
+    
+    // Try different address formats
+    if (location.formatted_address) {
+      fieldAddress = location.formatted_address;
+    } else if (location.address_text) {
+      fieldAddress = location.address_text;
+    } else {
+      // Build from components
+      const addressComponents = [
+        location.ward,
+        location.district,
+        location.city,
+        location.country
+      ].filter(Boolean);
+      
+      fieldAddress = addressComponents.length > 0 ? addressComponents.join(', ') : 'Chưa có thông tin địa chỉ';
+    }
+    
+    console.log('🏠 Final field address:', fieldAddress);
+    
+    // Extract customer information
+    const customerInfo = bookingData.customerInfo || bookingData.customer_info || bookingData.customer || {};
+    const customerName = customerInfo.name || customerInfo.fullName || customerInfo.customerName || 'Khách hàng';
+    const customerPhone = customerInfo.phone || customerInfo.phoneNumber || 'Chưa cung cấp';
+    const customerEmail = customerInfo.email || 'Chưa cung cấp';
+    
+    // Process time slots with detailed subfield information
+    const timeSlots = bookingData.timeSlots || bookingData.TimeSlots || [];
+    console.log('⏰ Processing time slots:', timeSlots.length);
+    
+    let processedTimeSlots = [];
+    let startTime = '';
+    let endTime = '';
+    
+    if (timeSlots.length > 0) {
+      // Process each time slot to include subfield information
+      processedTimeSlots = timeSlots.map(slot => {
+        const subfield = slot.subfield || slot.SubField || slot.subField || {};
+        const subfieldName = subfield.name || `Sân ${slot.subfieldId || 'N/A'}`;
+        
+        return {
+          startTime: slot.startTime || slot.start_time || '00:00',
+          endTime: slot.endTime || slot.end_time || '00:00',
+          subfield: {
+            id: subfield.id || slot.subfieldId,
+            name: subfieldName,
+            field_type: subfield.field_type || subfield.fieldType || 'unknown'
+          },
+          date: slot.date || bookingData.bookingDate || bookingData.date
+        };
+      });
+      
+      // Sort time slots by start time
+      processedTimeSlots.sort((a, b) => {
+        const timeA = a.startTime.replace(':', '');
+        const timeB = b.startTime.replace(':', '');
+        return timeA.localeCompare(timeB);
+      });
+      
+      // Get overall start and end time
+      startTime = processedTimeSlots[0].startTime;
+      endTime = processedTimeSlots[processedTimeSlots.length - 1].endTime;
+    }
+    
+    console.log('📅 Processed time slots:', processedTimeSlots.length);
+    
+    const transformedData = {
+      id: bookingData.id || bookingData.bookingId,
+      fieldName: fieldName,
+      fieldAddress: fieldAddress,
+      address: fieldAddress, // Additional fallback field
+      field: {
+        name: fieldName,
+        location: {
+          formatted_address: fieldAddress,
+          address_text: location.address_text || fieldAddress,
+          ward: location.ward,
+          district: location.district,
+          city: location.city,
+          country: location.country
+        }
+      },
+      fieldLocation: location, // Keep original for fallback
+      date: bookingData.bookingDate || bookingData.date,
+      bookingDate: bookingData.bookingDate || bookingData.date,
+      startTime: startTime,
+      endTime: endTime,
+      timeSlots: processedTimeSlots, // Enhanced time slots with subfield info
+      totalAmount: bookingData.totalAmount || bookingData.total_price || 0,
+      customerName: customerName,
+      customerPhone: customerPhone,
+      customerEmail: customerEmail,
+      customerInfo: {
+        name: customerName,
+        phone: customerPhone,
+        email: customerEmail,
+        ...customerInfo
+      }
+    };
+    
+    console.log('✅ TRANSFORM COMPLETE:');
+    console.log('- Field name:', transformedData.fieldName);
+    console.log('- Field address:', transformedData.fieldAddress);
+    console.log('- Time slots:', transformedData.timeSlots.length);
+    console.log('- Customer:', transformedData.customerName);
+    
+    return transformedData;
   }
 }
 

@@ -411,7 +411,7 @@ SELECT id, name, field_type
     ];
 
     for (const pattern of patterns) {
-      await cache.deletePattern(pattern);
+      cache.delPattern(pattern);
     }
   }
 
@@ -1354,6 +1354,56 @@ SELECT id, name, field_type
       console.error('Error getting field info from metadata:', error);
       return null;
     }
+  }
+
+  /**
+   * Get display status for a time slot based on booking and payment status
+   */
+  getSlotDisplayStatus(slot) {
+    // PRIORITY 1: If maintenance, return maintenance status regardless of booking
+    if (slot.status === 'maintenance') {
+      return 'maintenance';
+    }
+
+    // PRIORITY 2: If no booking, slot is available
+    if (!slot.booking_id) {
+      return 'available';
+    }
+
+    // PRIORITY 3: Check booking status
+    if (slot.booking_status === 'cancelled') {
+      return 'available';
+    }
+
+    if (slot.booking_status === 'confirmed') {
+      return 'booked';
+    }
+
+    if (slot.booking_status === 'payment_pending') {
+      return 'payment_pending';
+    }
+
+    // Default for other booking statuses
+    if (slot.booking_status) {
+      return 'booked';
+    }
+
+    return 'available';
+  }
+
+  /**
+   * Check if payment pending has expired (10 minutes from booking creation)
+   */
+  isPaymentPendingExpired(bookingDate) {
+    if (!bookingDate) {
+      return false;
+    }
+
+    const bookingTime = new Date(bookingDate);
+    const now = new Date();
+    const tenMinutesInMs = 10 * 60 * 1000; // 10 minutes
+
+    return (now.getTime() - bookingTime.getTime()) > tenMinutesInMs;
   }
 }
 
