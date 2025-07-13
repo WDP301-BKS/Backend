@@ -7,10 +7,15 @@ const geocodingService = require('../services/geocoding.enhanced');
 const logger = require('../utils/logger');
 const { getFieldQueryWithPackageValidation } = require('../middlewares/packageValidation.middleware');
 
-// Get all fields without pagination
+// Get all fields with pagination
 const getAllFields = async (req, res) => {
     try {
-        const fields = await Field.findAll({
+        // Get pagination params from request query
+        const limit = parseInt(req.query.limit) || 3; // Default to 3 items
+        const offset = parseInt(req.query.offset) || 0; // Default to first page
+
+        // Use findAndCountAll to get both the rows and total count
+        const { rows: fields, count: totalCount } = await Field.findAndCountAll({
             where: {
                 is_verified: true
             },
@@ -53,15 +58,26 @@ const getAllFields = async (req, res) => {
                 'is_verified', 
                 'created_at'
             ],
-            order: [['created_at', 'DESC']]
+            order: [['created_at', 'DESC']],
+            limit,
+            offset
         });
 
         return res.json({
             success: true,
-            data: fields
+            data: {
+                fields,
+                pagination: {
+                    total: totalCount,
+                    offset,
+                    limit,
+                    hasMore: offset + fields.length < totalCount
+                }
+            }
         });
     } catch (error) {
         console.error('Error in getAllFields:', error);
+        logger.error('Error in getAllFields:', error);
         return res.status(500).json({
             success: false,
             error: {
