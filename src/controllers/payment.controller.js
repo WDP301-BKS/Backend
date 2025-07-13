@@ -2322,6 +2322,7 @@ class PaymentController {
       if (!userId) {
         return res.status(401).json(responseFormatter.error({
           code: 'UNAUTHORIZED',
+         
           message: 'Bạn cần đăng nhập để mua gói dịch vụ'
        
         }));
@@ -2444,6 +2445,77 @@ class PaymentController {
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Đã có lỗi xảy ra khi lấy thông tin gói dịch vụ'
       }));
+    }
+  }
+
+  /**
+   * Calculate refund percentage based on cancellation time rules
+   * @param {Date} bookingDate - The date/time of the booked slot
+   * @param {Date} bookingCreatedAt - When the booking was created
+   * @param {Date} cancellationTime - When the cancellation was requested
+   * @returns {number} - Refund percentage (0-100)
+   */
+  calculateRefundPercentage(bookingDate, bookingCreatedAt, cancellationTime) {
+    try {
+      // Input validation and safeguards
+      if (!bookingDate || !bookingCreatedAt || !cancellationTime) {
+        logger.warn('Missing required parameters for refund calculation', { 
+          bookingDate, bookingCreatedAt, cancellationTime 
+        });
+        return 0; // Default to no refund if parameters are missing
+      }
+      
+      // Convert all dates to milliseconds for comparison
+      const bookingTime = new Date(bookingDate).getTime();
+      const creationTime = new Date(bookingCreatedAt).getTime();
+      const cancelTime = new Date(cancellationTime).getTime();
+      
+      // Safety check for invalid dates
+      if (isNaN(bookingTime) || isNaN(creationTime) || isNaN(cancelTime)) {
+        logger.warn('Invalid date format in refund calculation', { 
+          bookingDate, bookingCreatedAt, cancellationTime,
+          parsed: { bookingTime, creationTime, cancelTime }
+        });
+        return 0;
+      }
+      
+      // Immediate Cancellation: 100% if within 10 minutes of booking creation
+      const tenMinutesInMs = 10 * 60 * 1000;
+      if (cancelTime - creationTime <= tenMinutesInMs) {
+        logger.info('Immediate cancellation within 10 minutes of booking - 100% refund');
+        return 100;
+      }
+      
+      // Calculate time difference between cancellation and scheduled booking time
+      const timeUntilBooking = bookingTime - cancelTime;
+      const hoursUntilBooking = timeUntilBooking / (60 * 60 * 1000);
+      
+      // Advance Cancellation rules
+      if (hoursUntilBooking >= 48) {
+        // More than 48 hours before booking
+        logger.info('Cancellation more than 48 hours before booking - 100% refund');
+        return 100;
+      } else if (hoursUntilBooking >= 24) {
+        // Between 24-48 hours before booking
+        logger.info('Cancellation between 24-48 hours before booking - 75% refund');
+        return 75;
+      } else if (hoursUntilBooking >= 12) {
+        // Between 12-24 hours before booking
+        logger.info('Cancellation between 12-24 hours before booking - 50% refund');
+        return 50;
+      } else {
+        // Less than 12 hours before booking
+        logger.info('Late cancellation less than 12 hours before booking - 0% refund');
+        return 0;
+      }
+    } catch (error) {
+      logger.error('Error calculating refund percentage', { 
+        error: error.message, 
+        bookingDate, 
+        bookingCreatedAt, 
+        cancellationTime 
+      });
+      return 0; // Default to no refund on error
     }
   }
 }

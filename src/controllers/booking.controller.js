@@ -269,8 +269,12 @@ const cancelBooking = async (req, res) => {
                                  booking.total_price > 0;
 
         let refundAmount = 0;
+        let refundPercentage = 0;
         let stripeRefundId = null;
-
+        
+        // Import PaymentController để sử dụng calculateRefundPercentage
+        const paymentController = require('../controllers/payment.controller');
+        
         if (needsStripeRefund) {
             console.log('🔄 Processing Stripe refund for booking:', booking.id);
             
@@ -283,33 +287,99 @@ const cancelBooking = async (req, res) => {
                 if (!payment || !payment.stripe_payment_intent_id) {
                     throw new Error('Không tìm thấy thông tin thanh toán để hoàn tiền');
                 }
-
-                // Tạo refund qua Stripe
-                const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-                const refund = await stripe.refunds.create({
-                    payment_intent: payment.stripe_payment_intent_id,
-                    amount: Math.round(booking.total_price), // VND amount
-                    reason: 'requested_by_customer',
-                    metadata: {
-                        booking_id: booking.id,
-                        cancellation_reason: reason,
-                        user_id: userId
-                    }
+                
+                // Get first timeslot to determine booking date/time
+                const firstTimeSlot = await TimeSlot.findOne({
+                    where: { booking_id: booking.id },
+                    order: [['date', 'ASC'], ['start_time', 'ASC']]
                 });
+                
+                // Extract booking date and time
+                const bookingDateTime = firstTimeSlot 
+                    ? new Date(`${firstTimeSlot.date}T${firstTimeSlot.start_time}`) 
+                    : new Date(booking.booking_date);
+                
+                // Calculate refund percentage based on cancellation rules
+                try {
+                    // Ensure all dates are valid before calculation
+                    if (!bookingDateTime || isNaN(bookingDateTime.getTime())) {
+                        console.warn('Invalid booking date time for refund calculation:', bookingDateTime);
+                        bookingDateTime = new Date(); // Fallback to current time if invalid
+                    }
+                    
+                    // Log the input parameters for debugging
+                    console.log('Refund calculation parameters:', {
+                        bookingDateTime: bookingDateTime.toISOString(),
+                        created_at: booking.created_at,
+                        cancellationTime: new Date().toISOString()
+                    });
+                    
+                    try {
+                        refundPercentage = paymentController.calculateRefundPercentage(
+                            bookingDateTime, 
+                            booking.created_at, 
+                            new Date()
+                        );
+                        
+                        console.log(`📊 Calculated refund percentage: ${refundPercentage}%`);
+                    } catch (refundCalcError) {
+                        console.error('Error calculating refund percentage:', refundCalcError);
+                        // Default to 0% refund if calculation fails
+                        refundPercentage = 0;
+                    }
+                } catch (calcError) {
+                    console.error('Error during refund calculation:', calcError);
+                    // Default to 0% refund on calculation error
+                    refundPercentage = 0;
+                }
+                
+                // Calculate refund amount based on percentage
+                refundAmount = Math.round((booking.total_price * refundPercentage) / 100);
+                
+                // Skip refund process if refund amount is 0
+                if (refundAmount <= 0) {
+                    console.log('⚠️ No refund will be processed (0% refund policy applied)');
+                    stripeRefundId = 'no-refund';
+                } else {
+                    // Tạo refund qua Stripe
+                    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+                    const refund = await stripe.refunds.create({
+                        payment_intent: payment.stripe_payment_intent_id,
+                        amount: refundAmount, // Apply calculated refund amount
+                        reason: 'requested_by_customer',
+                        metadata: {
+                            booking_id: booking.id,
+                            cancellation_reason: reason,
+                            user_id: userId,
+                            refund_percentage: refundPercentage,
+                            cancellation_time: new Date().toISOString(),
+                            booking_time: bookingDateTime.toISOString()
+                        }
+                    });
 
-                stripeRefundId = refund.id;
-                refundAmount = booking.total_price;
+                    stripeRefundId = refund.id;
+                    console.log(`✅ Stripe refund created for ${refundPercentage}% (${refundAmount}đ): ${refund.id}`);
+                }
 
                 // Cập nhật payment record với refund info
-                await payment.update({
-                    status: 'refunded',
-                    refund_amount: refundAmount,
-                    refund_reason: reason,
-                    stripe_refund_id: refund.id,
-                    updated_at: new Date()
-                });
-
-                console.log('✅ Stripe refund created successfully:', refund.id);
+                if (refundAmount > 0) {
+                    await payment.update({
+                        status: 'refunded',
+                        refund_amount: refundAmount,
+                        refund_percentage: refundPercentage,
+                        refund_reason: reason,
+                        stripe_refund_id: stripeRefundId,
+                        updated_at: new Date()
+                    });
+                } else {
+                    // If no refund was processed, just mark as cancelled
+                    await payment.update({
+                        refund_amount: 0,
+                        refund_percentage: refundPercentage,
+                        refund_reason: reason,
+                        updated_at: new Date()
+                    });
+                }
 
             } catch (stripeError) {
                 console.error('❌ Error creating Stripe refund:', stripeError);
@@ -322,21 +392,18 @@ const cancelBooking = async (req, res) => {
             }
         } else {
             // Trường hợp chưa thanh toán - chỉ hủy booking
-            refundAmount = booking.deposit_amount || 0;
-        }
-
-        // Calculate refund amount for non-Stripe cases
-        if (!needsStripeRefund) {
-            refundAmount = booking.deposit_amount || 0;
+            refundAmount = 0;
+            refundPercentage = 0;
         }
 
         // Update booking status with cancellation details
         const updateData = {
             status: 'cancelled',
-            payment_status: needsStripeRefund ? 'refunded' : 'cancelled',
+            payment_status: needsStripeRefund && refundAmount > 0 ? 'refunded' : 'cancelled',
             cancellation_reason: reason,
             refund_method: needsStripeRefund ? 'stripe_refund' : refundMethod,
             refund_amount: refundAmount,
+            refund_percentage: refundPercentage,
             cancelled_at: new Date(),
             updated_at: new Date()
         };
@@ -375,14 +442,15 @@ const cancelBooking = async (req, res) => {
             // Emit booking status update
             emitBookingStatusUpdate(booking.id, {
                 status: 'cancelled',
-                payment_status: needsStripeRefund ? 'refunded' : 'cancelled',
+                payment_status: needsStripeRefund && refundAmount > 0 ? 'refunded' : 'cancelled',
                 userId: booking.user_id,
                 bookingId: booking.id,
                 refundAmount: refundAmount,
+                refundPercentage: refundPercentage,
                 cancellationReason: reason,
                 timestamp: new Date().toISOString(),
-                message: needsStripeRefund 
-                    ? 'Booking cancelled and refund processed'
+                message: needsStripeRefund && refundAmount > 0
+                    ? `Booking cancelled with ${refundPercentage}% refund processed`
                     : 'Booking cancelled successfully'
             });
 
@@ -391,13 +459,14 @@ const cancelBooking = async (req, res) => {
                 userId: booking.user_id,
                 bookingId: booking.id,
                 status: 'cancelled',
-                payment_status: needsStripeRefund ? 'refunded' : 'cancelled',
+                payment_status: needsStripeRefund && refundAmount > 0 ? 'refunded' : 'cancelled',
                 refundAmount: refundAmount,
-                wasStripeRefund: needsStripeRefund,
+                refundPercentage: refundPercentage,
+                wasStripeRefund: needsStripeRefund && refundAmount > 0,
                 timestamp: new Date().toISOString(),
                 refresh_needed: true, // Flag để frontend biết cần refresh
-                message: needsStripeRefund 
-                    ? 'Your booking has been cancelled and refund is being processed'
+                message: needsStripeRefund && refundAmount > 0
+                    ? `Your booking has been cancelled with ${refundPercentage}% refund (${refundAmount.toLocaleString('vi-VN')}đ)`
                     : 'Your booking has been cancelled successfully'
             });
 
@@ -408,27 +477,83 @@ const cancelBooking = async (req, res) => {
             console.error('❌ Error sending real-time notifications (cancellation still succeeded):', socketError);
         }
 
+        // Prepare detailed success message based on refund percentage
+        let successMessage = 'Đã hủy đặt sân thành công';
+        if (needsStripeRefund) {
+            if (refundPercentage === 100) {
+                successMessage = 'Đã hủy đặt sân và hoàn 100% số tiền thành công';
+            } else if (refundPercentage > 0) {
+                successMessage = `Đã hủy đặt sân và hoàn ${refundPercentage}% số tiền (${refundAmount.toLocaleString('vi-VN')}đ)`;
+            } else {
+                successMessage = 'Đã hủy đặt sân thành công. Không được hoàn tiền do hủy muộn.';
+            }
+        }
+        
         return res.json(responseFormatter.success({
-            message: needsStripeRefund 
-                ? 'Đã hủy đặt sân và hoàn tiền thành công' 
-                : 'Đã hủy đặt sân thành công',
+            message: successMessage,
             data: {
                 bookingId: booking.id,
                 refundAmount: refundAmount,
+                refundPercentage: refundPercentage,
                 refundMethod: needsStripeRefund ? 'stripe_refund' : refundMethod,
                 cancellationReason: reason,
                 stripeRefundId: stripeRefundId,
-                wasStripeRefund: needsStripeRefund
+                wasStripeRefund: needsStripeRefund && refundAmount > 0
             }
         }));
 
     } catch (error) {
         console.error('Error in cancelBooking:', error);
+        
+        // Log detailed error information for debugging
+        console.error('Detailed error context:', {
+            bookingId: req.params.id,
+            userId: req.user?.id,
+            reason: req.body?.reason,
+            error: {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+                code: error.code
+            }
+        });
+        
         performanceMonitor.endOperation(operationId, { error: error.message });
         performanceMonitor.monitorBookingOperation('cancel', req.params.id, 0, false, error.message);
-        return res.status(500).json(responseFormatter.error({
-            code: 'INTERNAL_SERVER_ERROR',
-            message: 'Đã có lỗi xảy ra khi hủy đặt sân'
+        
+        // Provide more specific error messages based on error type
+        let errorMessage = 'Đã có lỗi xảy ra khi hủy đặt sân';
+        let errorCode = 'INTERNAL_SERVER_ERROR';
+        let statusCode = 500;
+        
+        if (error.name === 'TypeError') {
+            if (error.message && error.message.includes('is not a constructor')) {
+                errorMessage = 'Lỗi cấu hình hệ thống. Vui lòng liên hệ hỗ trợ.';
+                errorCode = 'SYSTEM_CONFIG_ERROR';
+                // Log critical error for admin attention
+                console.error('CRITICAL ERROR: Component initialization failure in booking cancellation');
+            } else {
+                errorMessage = 'Lỗi khi xử lý dữ liệu hủy đặt sân. Vui lòng thử lại sau.';
+                errorCode = 'TYPE_ERROR';
+            }
+        } else if (error.message && error.message.includes('Stripe')) {
+            errorMessage = 'Lỗi khi xử lý hoàn tiền. Vui lòng liên hệ hỗ trợ.';
+            errorCode = 'STRIPE_ERROR';
+        } else if (error.name === 'SequelizeConnectionError') {
+            errorMessage = 'Lỗi kết nối cơ sở dữ liệu. Vui lòng thử lại sau.';
+            errorCode = 'DATABASE_ERROR';
+        }
+        
+        // For client-friendly error message on frontend
+        console.debug(errorMessage, {
+            service: 'sports-field-api',
+            statusCode: errorCode
+        });
+        
+        return res.status(statusCode).json(responseFormatter.error({
+            code: errorCode,
+            message: errorMessage,
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
         }));
     }
 };

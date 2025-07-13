@@ -11,7 +11,7 @@ const paymentRoutes = require('./payment.routes');
 const timeSlotRoutes = require('./timeslot.routes');
 const fieldPricingRuleRoutes = require('./field_pricing_rule.routes');
 const maintenanceRoutes = require('./maintenance.routes');
-
+const secureImageRoutes = require('./secureImage.routes');
 
 const adminRoutes = require('./admin.routes');
 
@@ -51,5 +51,8 @@ router.use('/pricing-rules', fieldPricingRuleRoutes);
 
 // Mount maintenance routes
 router.use('/maintenance', maintenanceRoutes);
+
+// Mount secure image routes
+router.use('/secure-images', secureImageRoutes);
 
 module.exports = router;

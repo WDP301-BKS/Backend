@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/admin.controller');
+const adminFieldController = require('../controllers/admin.field.controller');
 const { authMiddleware, isAdmin } = require('../middlewares/auth.middleware');
 
 // Tất cả routes admin đều cần authentication và role admin
@@ -13,6 +14,13 @@ router.get('/dashboard/stats', adminController.getDashboardStats);
 router.get('/fields', adminController.getAllFieldsForAdmin);
 router.get('/fields/pending', adminController.getPendingFields);
 router.put('/fields/:fieldId/approve', adminController.approveField);
+
+// New Field Management routes
+router.get('/fields/all', adminFieldController.getAdminFields);
+router.get('/fields/paginated', adminFieldController.getAdminFieldsPaginated);
+router.get('/fields/detail/:id', adminFieldController.getAdminFieldDetail);
+router.put('/fields/verify/:id', adminFieldController.verifyField);
+router.put('/fields/reject/:id', adminFieldController.rejectField);
 
 // Quản lý user
 router.get('/users', adminController.getAllUsers);

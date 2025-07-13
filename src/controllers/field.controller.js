@@ -337,26 +337,38 @@ const addFieldWithFiles = async (req, res) => {
                     images3 = result3.secure_url;
                 }
                 
-                // Handle business documents upload to Cloudinary
+                // Handle business documents upload to Cloudinary (as private/secure documents)
                 if (uploadedFiles.business_license_image) {
                     const businessResult = await uploadImage(uploadedFiles.business_license_image[0].buffer, {
-                        folder: 'business-licenses',
-                        public_id: `business_license_${owner_id}_${Date.now()}`
+                        folder: 'secure_documents/business_licenses',
+                        public_id: `business_license_${owner_id}_${Date.now()}`,
+                        secure: true, // Mark as secure/private document
+                        type: 'private'
                     });
                     businessLicenseUrl = businessResult.secure_url;
-                }                if (uploadedFiles.identity_card_image) {
+                    console.log('Uploaded business license as private document:', businessLicenseUrl);
+                }
+                
+                if (uploadedFiles.identity_card_image) {
                     const identityResult = await uploadImage(uploadedFiles.identity_card_image[0].buffer, {
-                        folder: 'identity-cards',
-                        public_id: `identity_card_${owner_id}_${Date.now()}`
+                        folder: 'secure_documents/identity_cards',
+                        public_id: `identity_card_${owner_id}_${Date.now()}`,
+                        secure: true, // Mark as secure/private document
+                        type: 'private'
                     });
                     identityCardUrl = identityResult.secure_url;
+                    console.log('Uploaded identity card front as private document:', identityCardUrl);
                 }
+                
                 if (uploadedFiles.identity_card_back_image) {
                     const identityBackResult = await uploadImage(uploadedFiles.identity_card_back_image[0].buffer, {
-                        folder: 'identity-cards',
-                        public_id: `identity_card_back_${owner_id}_${Date.now()}`
+                        folder: 'secure_documents/identity_cards',
+                        public_id: `identity_card_back_${owner_id}_${Date.now()}`,
+                        secure: true, // Mark as secure/private document
+                        type: 'private'
                     });
                     identityCardBackUrl = identityBackResult.secure_url;
+                    console.log('Uploaded identity card back as private document:', identityCardBackUrl);
                 }
             } catch (uploadError) {
                 console.error('Error uploading to Cloudinary:', uploadError);
