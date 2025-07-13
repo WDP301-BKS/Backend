@@ -1221,6 +1221,32 @@ const cancelBookingForMaintenance = async (req, res) => {
         }
 
         performanceMonitor.endOperation(operationId, { success: true });
+        // ==== Gửi notification realtime cho user bị hủy booking do bảo trì ====
+        try {
+            const { createNotification } = require('../services/notification.service');
+            const { emitNewNotification } = require('../config/socket.config');
+            // Lấy thông tin slot đầu tiên
+            let notifyMsg = '';
+            if (booking.timeSlots && booking.timeSlots.length > 0) {
+                const slot = booking.timeSlots[0];
+                const fieldName = slot.subfield && slot.subfield.field ? slot.subfield.field.name : 'Sân bóng';
+                const date = slot.date;
+                const startTime = slot.start_time;
+                const endTime = slot.end_time;
+                notifyMsg = `Đặt sân của bạn tại ${fieldName} vào ngày ${date} từ ${startTime} đến ${endTime} đã bị hủy. Lý do: ${booking.cancellation_reason || 'Bảo trì sân.'}`;
+            } else {
+                notifyMsg = `Đặt sân của bạn đã bị hủy. Lý do: ${booking.cancellation_reason || 'Bảo trì sân.'}`;
+            }
+            const notification = await createNotification(
+                booking.user_id,
+                'Đặt sân bị hủy do bảo trì',
+                notifyMsg
+            );
+            if (emitNewNotification) emitNewNotification([booking.user_id], notification);
+        } catch (err) {
+            console.error('[Notify user cancelBookingForMaintenance] Error sending notification:', err);
+        }
+
         return res.json(responseFormatter.success({
             bookingId: booking.id,
             cancelled: true,
@@ -1261,13 +1287,13 @@ const cancelMultipleBookingsForMaintenance = async (req, res) => {
         const results = [];
         let totalRefundAmount = 0;
         let customerEmails = new Map(); // Group by customer email
-        
+        const { createNotification } = require('../services/notification.service');
+        const { emitNewNotification } = require('../config/socket.config');
         // Process each booking
         for (const bookingId of bookingIds) {
             try {
                 // 🔍 DEBUG: Log each booking being processed
                 console.log(`🔄 Processing booking: ${bookingId}`);
-                
                 // Find booking with related data
                 const booking = await Booking.findOne({
                     where: { id: bookingId },
@@ -1320,7 +1346,6 @@ const cancelMultipleBookingsForMaintenance = async (req, res) => {
 
                 // 🔍 DEBUG: Check for payment_pending protection in multiple cancellation
                 console.log(`📋 Booking ${bookingId} status: ${booking.status}, payment_status: ${booking.payment_status}`);
-                
                 // Protect bookings that are pending payment (same as single cancellation)
                 if (booking.status === 'payment_pending') {
                     console.log(`🛡️ MULTIPLE CANCELLATION: Protecting payment_pending booking ${bookingId}`);
@@ -1398,7 +1423,6 @@ const cancelMultipleBookingsForMaintenance = async (req, res) => {
                             maintenance_reason: maintenanceReason,
                             maintenance_until: null
                         });
-                        
                         // Clear cache
                         const dbOptimizer = require('../utils/dbOptimizer');
                         await dbOptimizer.clearAvailabilityCache(timeSlot.sub_field_id, timeSlot.date);
@@ -1439,6 +1463,30 @@ const cancelMultipleBookingsForMaintenance = async (req, res) => {
                     refundAmount,
                     customerEmail: user.email
                 });
+
+                // ==== Gửi notification realtime và lưu vào database cho user bị hủy booking do bảo trì ====
+                try {
+                    // Lấy thông tin slot đầu tiên
+                    let notifyMsg = '';
+                    if (booking.timeSlots && booking.timeSlots.length > 0) {
+                        const slot = booking.timeSlots[0];
+                        const fieldName = slot.subfield && slot.subfield.field ? slot.subfield.field.name : 'Sân bóng';
+                        const date = slot.date;
+                        const startTime = slot.start_time;
+                        const endTime = slot.end_time;
+                        notifyMsg = `Đặt sân của bạn tại ${fieldName} vào ngày ${date} từ ${startTime} đến ${endTime} đã bị hủy. Lý do: ${booking.cancellation_reason || 'Bảo trì sân.'}`;
+                    } else {
+                        notifyMsg = `Đặt sân của bạn đã bị hủy. Lý do: ${booking.cancellation_reason || 'Bảo trì sân.'}`;
+                    }
+                    const notification = await createNotification(
+                        booking.user_id,
+                        'Đặt sân bị hủy do bảo trì',
+                        notifyMsg
+                    );
+                    if (emitNewNotification) emitNewNotification([booking.user_id], notification);
+                } catch (err) {
+                    console.error('[Notify user cancelMultipleBookingsForMaintenance] Error sending notification:', err);
+                }
 
                 console.log(`✅ Successfully processed booking ${bookingId} - refund: ${refundAmount}đ`);
 
