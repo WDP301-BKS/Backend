@@ -151,7 +151,7 @@ class ChatService {
     }
 
     // Kiểm tra quyền truy cập chat
-    await this.validateChatAccess(chatId, senderId);
+    const chat = await this.validateChatAccess(chatId, senderId);
 
     // Tạo tin nhắn
     const message = await Message.create({
@@ -170,6 +170,51 @@ class ChatService {
         },
       ],
     });
+
+    // Tạo notification cho người nhận
+    const otherUserId = chat.user1.id === senderId ? chat.user2.id : chat.user1.id;
+    const { createNotification } = require('./notification.service');
+
+    // Kiểm tra notification chưa đọc đã tồn tại cho user nhận, chat này và sender này chưa
+    const Notification = require('../models/notification.model');
+    const existingNotification = await Notification.findOne({
+      where: {
+        user_id: otherUserId,
+        is_read: false,
+        title: 'Tin nhắn mới',
+        // Phân biệt theo chatId và senderId để không cộng dồn sai
+        message: { [Op.like]: `%chat:${chatId}%sender:${senderId}%` },
+      },
+      order: [['created_at', 'DESC']],
+    });
+
+    const { emitNewNotification } = require('../config/socket.config');
+    let notification;
+    if (existingNotification) {
+      // Đếm lại số tin nhắn chưa đọc từ senderId tới otherUserId trong chat này
+      const unreadCount = await Message.count({
+        where: {
+          chat_id: chatId,
+          sender_id: senderId,
+          is_read: false,
+        },
+      });
+      // Cập nhật message notification hiện tại
+      existingNotification.message = `Bạn có ${unreadCount > 0 ? unreadCount : 1} tin nhắn mới từ ${messageWithSender.sender?.name || 'người dùng'} (chat:${chatId} sender:${senderId})`;
+      await existingNotification.save();
+      notification = existingNotification;
+    } else {
+      // Tạo notification mới, nhúng chatId và senderId vào message để phân biệt
+      notification = await createNotification(
+        otherUserId,
+        'Tin nhắn mới',
+        `Bạn có 1 tin nhắn mới từ ${messageWithSender.sender?.name || 'người dùng'} (chat:${chatId} sender:${senderId})`
+      );
+    }
+    // Emit socket notification realtime cho user nhận
+    if (emitNewNotification) {
+      emitNewNotification([otherUserId], notification);
+    }
 
     return this.formatMessage(messageWithSender, senderId);
   }

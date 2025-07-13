@@ -237,6 +237,23 @@ const verifyField = async (req, res) => {
         // Log the approval action
         logger.info(`Admin ${req.user.id} approved field ${id}`);
 
+        // ==== Gửi notification realtime cho chủ sân khi duyệt sân ====
+        try {
+            const { createNotification } = require('../services/notification.service');
+            const { emitNewNotification } = require('../config/socket.config');
+            // Lấy thông tin chủ sân
+            const ownerId = field.owner_id || (field.owner && field.owner.id);
+            let notifyMsg = `Sân bóng của bạn (${field.name}) đã được duyệt thành công.`;
+            const notification = await createNotification(
+                ownerId,
+                'Sân bóng đã được duyệt',
+                notifyMsg
+            );
+            if (emitNewNotification && ownerId) emitNewNotification([ownerId], notification);
+        } catch (err) {
+            console.error('[Notify owner verifyField] Error sending notification:', err);
+        }
+
         return res.json({
             success: true,
             message: 'Sân bóng đã được duyệt thành công',

@@ -1,3 +1,26 @@
+// Emit new notification to user (for chat notification realtime)
+const emitNewNotification = (userIds, notification) => {
+  try {
+    if (!io) {
+      logger.warn('Socket.IO not initialized');
+      return false;
+    }
+    if (!userIds || !notification) {
+      logger.warn('Invalid parameters for emitNewNotification');
+      return false;
+    }
+    userIds.forEach(userId => {
+      if (userId) {
+        io.to(`user_${userId}`).emit('new_notification', notification);
+        logger.info(`New notification emitted to user ${userId}`);
+      }
+    });
+    return true;
+  } catch (error) {
+    logger.error('Error emitting new notification:', error);
+    return false;
+  }
+};
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
@@ -1391,4 +1414,5 @@ module.exports = {
   getOnlineUsersCount,
   getOnlineUsersList,
   disconnectUser
+  ,emitNewNotification
 };

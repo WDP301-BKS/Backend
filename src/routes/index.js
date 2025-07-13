@@ -12,6 +12,7 @@ const timeSlotRoutes = require('./timeslot.routes');
 const fieldPricingRuleRoutes = require('./field_pricing_rule.routes');
 const maintenanceRoutes = require('./maintenance.routes');
 const secureImageRoutes = require('./secureImage.routes');
+const notificationRoutes = require('./notification.routes');
 
 const adminRoutes = require('./admin.routes');
 
@@ -29,8 +30,12 @@ router.use('/owners', ownerRoutes);
 // Mount field routes
 router.use('/fields', fieldRoutes);
 
+
 // Mount chat routes
 router.use('/chats', chatRoutes);
+
+// Mount notification routes
+router.use('/notifications', notificationRoutes);
 
 router.use('/favorites', favorite);
 router.use('/reviews', reviewRoutes);
