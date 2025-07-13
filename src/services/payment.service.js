@@ -381,7 +381,7 @@ class PaymentService {
   /**
    * Create refund
    */
-  async createRefund(paymentId, refundAmount, reason) {
+  async createRefund(paymentId, refundAmount, reason, refundPercentage = 100) {
     try {
       const payment = await Payment.findByPk(paymentId, {
         include: [{ model: Booking }]
@@ -394,10 +394,13 @@ class PaymentService {
       if (payment.status !== 'succeeded') {
         throw new Error('Can only refund successful payments');
       }
-
+      
+      // Calculate refund amount based on percentage if not specified
+      const amountToRefund = refundAmount || Math.round((payment.amount * refundPercentage) / 100);
+      
       const refund = await getStripe().refunds.create({
         charge: payment.stripe_charge_id,
-        amount: Math.round(refundAmount),
+        amount: Math.round(amountToRefund),
         reason: 'requested_by_customer',
         metadata: {
           booking_id: payment.booking_id,

@@ -7,10 +7,15 @@ const geocodingService = require('../services/geocoding.enhanced');
 const logger = require('../utils/logger');
 const { getFieldQueryWithPackageValidation } = require('../middlewares/packageValidation.middleware');
 
-// Get all fields without pagination
+// Get all fields with pagination
 const getAllFields = async (req, res) => {
     try {
-        const fields = await Field.findAll({
+        // Get pagination params from request query
+        const limit = parseInt(req.query.limit) || 3; // Default to 3 items
+        const offset = parseInt(req.query.offset) || 0; // Default to first page
+
+        // Use findAndCountAll to get both the rows and total count
+        const { rows: fields, count: totalCount } = await Field.findAndCountAll({
             where: {
                 is_verified: true
             },
@@ -53,15 +58,26 @@ const getAllFields = async (req, res) => {
                 'is_verified', 
                 'created_at'
             ],
-            order: [['created_at', 'DESC']]
+            order: [['created_at', 'DESC']],
+            limit,
+            offset
         });
 
         return res.json({
             success: true,
-            data: fields
+            data: {
+                fields,
+                pagination: {
+                    total: totalCount,
+                    offset,
+                    limit,
+                    hasMore: offset + fields.length < totalCount
+                }
+            }
         });
     } catch (error) {
         console.error('Error in getAllFields:', error);
+        logger.error('Error in getAllFields:', error);
         return res.status(500).json({
             success: false,
             error: {
@@ -337,26 +353,38 @@ const addFieldWithFiles = async (req, res) => {
                     images3 = result3.secure_url;
                 }
                 
-                // Handle business documents upload to Cloudinary
+                // Handle business documents upload to Cloudinary (as private/secure documents)
                 if (uploadedFiles.business_license_image) {
                     const businessResult = await uploadImage(uploadedFiles.business_license_image[0].buffer, {
-                        folder: 'business-licenses',
-                        public_id: `business_license_${owner_id}_${Date.now()}`
+                        folder: 'secure_documents/business_licenses',
+                        public_id: `business_license_${owner_id}_${Date.now()}`,
+                        secure: true, // Mark as secure/private document
+                        type: 'private'
                     });
                     businessLicenseUrl = businessResult.secure_url;
-                }                if (uploadedFiles.identity_card_image) {
+                    console.log('Uploaded business license as private document:', businessLicenseUrl);
+                }
+                
+                if (uploadedFiles.identity_card_image) {
                     const identityResult = await uploadImage(uploadedFiles.identity_card_image[0].buffer, {
-                        folder: 'identity-cards',
-                        public_id: `identity_card_${owner_id}_${Date.now()}`
+                        folder: 'secure_documents/identity_cards',
+                        public_id: `identity_card_${owner_id}_${Date.now()}`,
+                        secure: true, // Mark as secure/private document
+                        type: 'private'
                     });
                     identityCardUrl = identityResult.secure_url;
+                    console.log('Uploaded identity card front as private document:', identityCardUrl);
                 }
+                
                 if (uploadedFiles.identity_card_back_image) {
                     const identityBackResult = await uploadImage(uploadedFiles.identity_card_back_image[0].buffer, {
-                        folder: 'identity-cards',
-                        public_id: `identity_card_back_${owner_id}_${Date.now()}`
+                        folder: 'secure_documents/identity_cards',
+                        public_id: `identity_card_back_${owner_id}_${Date.now()}`,
+                        secure: true, // Mark as secure/private document
+                        type: 'private'
                     });
                     identityCardBackUrl = identityBackResult.secure_url;
+                    console.log('Uploaded identity card back as private document:', identityCardBackUrl);
                 }
             } catch (uploadError) {
                 console.error('Error uploading to Cloudinary:', uploadError);
