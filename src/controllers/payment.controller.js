@@ -533,8 +533,8 @@ class PaymentController {
               playDate: bookingDate,
               timeSlots
             },
-            success_url: `${req.headers.origin || 'http://localhost:5173'}/booking/confirmation?booking_id=${booking.id}&session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${req.headers.origin || 'http://localhost:5173'}/payment/cancel`
+            success_url: `${req.headers.origin || 'https://frontend-wjcm.vercel.app'}/booking/confirmation?booking_id=${booking.id}&session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${req.headers.origin || 'https://frontend-wjcm.vercel.app'}/payment/cancel`
           };
 
           const paymentResult = await PaymentService.createCheckoutSession(paymentData);
@@ -2036,7 +2036,7 @@ class PaymentController {
   async continuePaymentForBooking(req, res) {
     try {
       const { bookingId } = req.params;
-      const { return_url = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/booking/confirmation`, cancel_url } = req.body;
+      const { return_url = `${process.env.FRONTEND_URL || 'https://frontend-wjcm.vercel.app'}/booking/confirmation`, cancel_url } = req.body;
       
       logger.info(`Continuing payment for booking: ${bookingId}`);
       
@@ -2158,7 +2158,7 @@ class PaymentController {
           booking_date: booking.booking_date
         },
         success_url: `${new URL(return_url).origin}/booking-history?payment=success&booking_id=${booking.id}&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: cancel_url || `${process.env.FRONTEND_URL || 'http://localhost:5173'}/booking-history?payment=cancel`,
+        cancel_url: cancel_url || `${process.env.FRONTEND_URL || 'https://frontend-wjcm.vercel.app'}/booking-history?payment=cancel`,
         client_reference_id: booking.id
       });
       

@@ -38,8 +38,8 @@ const initializeSocket = (httpServer) => {
   io = new Server(httpServer, {
     cors: {
       origin: [
-        process.env.FRONTEND_URL || 'http://localhost:5173',
-        'http://localhost:5173',
+        process.env.FRONTEND_URL || 'https://frontend-wjcm.vercel.app',
+        'https://frontend-wjcm.vercel.app',
         'http://127.0.0.1:5173',
         'https://localhost:5173'
       ],
