@@ -70,6 +70,17 @@ app.get('/', (req, res) => {
   res.json(responseFormatter.success({ message: 'Welcome to Football Field Booking API.' }));
 });
 
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json(responseFormatter.success({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV,
+    version: require('../package.json').version
+  }));
+});
+
 // Handle 404
 app.use((req, res) => {
   res.status(404).json(
@@ -102,7 +113,7 @@ app.use((err, req, res, next) => {
 });
 
 // Server setup
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT;
 
 // Test DB connection and sync models
 const startServer = async () => {
