@@ -40,6 +40,20 @@ class NotificationService {
     await notification.save();
     return notification;
   }
+
+  /**
+   * Lấy số lượng notification chưa đọc
+   * @param {string} userId
+   * @returns {Promise<number>}
+   */
+  async getUnreadNotificationCount(userId) {
+    return Notification.count({
+      where: { 
+        user_id: userId, 
+        is_read: false 
+      },
+    });
+  }
 }
 
 module.exports = new NotificationService();

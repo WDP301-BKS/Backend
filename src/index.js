@@ -120,6 +120,11 @@ const startServer = async () => {
     PaymentTimeoutService.init();
     logger.info('PaymentTimeoutService initialized for expired bookings cleanup');
     
+    // Initialize BookingStatusService for auto-completing bookings
+    const BookingStatusService = require('./services/bookingStatusService');
+    BookingStatusService.startPeriodicStatusUpdate();
+    logger.info('BookingStatusService initialized for auto-updating booking status');
+    
     // Initialize cron jobs
     const { initCronJobs } = require('./utils/cronJobs');
     initCronJobs();

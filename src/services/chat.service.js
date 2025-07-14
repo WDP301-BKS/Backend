@@ -173,6 +173,7 @@ class ChatService {
 
     // Tạo notification cho người nhận
     const otherUserId = chat.user1.id === senderId ? chat.user2.id : chat.user1.id;
+    console.log('📧 Creating notification for user:', otherUserId, 'from sender:', senderId);
     const { createNotification } = require('./notification.service');
 
     // Kiểm tra notification chưa đọc đã tồn tại cho user nhận, chat này và sender này chưa
@@ -190,7 +191,9 @@ class ChatService {
 
     const { emitNewNotification } = require('../config/socket.config');
     let notification;
+    console.log('🔍 Existing notification check for otherUserId:', otherUserId);
     if (existingNotification) {
+      console.log('✏️ Updating existing notification:', existingNotification.id);
       // Đếm lại số tin nhắn chưa đọc từ senderId tới otherUserId trong chat này
       const unreadCount = await Message.count({
         where: {
@@ -204,16 +207,22 @@ class ChatService {
       await existingNotification.save();
       notification = existingNotification;
     } else {
+      console.log('🆕 Creating new notification for user:', otherUserId);
       // Tạo notification mới, nhúng chatId và senderId vào message để phân biệt
       notification = await createNotification(
         otherUserId,
         'Tin nhắn mới',
         `Bạn có 1 tin nhắn mới từ ${messageWithSender.sender?.name || 'người dùng'} (chat:${chatId} sender:${senderId})`
       );
+      console.log('✅ New notification created:', notification.id);
     }
     // Emit socket notification realtime cho user nhận
+    console.log('🔔 Emitting notification to user:', otherUserId);
     if (emitNewNotification) {
       emitNewNotification([otherUserId], notification);
+      console.log('📡 Notification emitted successfully');
+    } else {
+      console.log('❌ emitNewNotification function not available');
     }
 
     return this.formatMessage(messageWithSender, senderId);

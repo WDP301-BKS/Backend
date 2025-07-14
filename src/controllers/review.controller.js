@@ -53,37 +53,92 @@ const createReview = async (req, res) => {
     }
 
     // Kiểm tra user có ít nhất 1 booking completed cho field này
-    const completedBooking = await Booking.findOne({
+    // Tự động cập nhật booking đã qua thời gian thành completed
+    const BookingStatusService = require('../services/bookingStatusService');
+    
+    // Tìm các booking completed qua relationship (chính xác nhất)
+    const completedBookings = await Booking.findAll({
       where: {
         user_id,
         status: 'completed',
       },
+      include: [{
+        model: TimeSlot,
+        as: 'timeSlots',
+        include: [{
+          model: SubField,
+          as: 'subfield',
+          where: { field_id: field_id },
+          required: true
+        }],
+        required: true
+      }]
     });
+    
     let hasCompleted = false;
     let booking_id = null;
-    if (completedBooking && completedBooking.booking_metadata?.fieldId == field_id) {
+    
+    if (completedBookings.length > 0) {
       hasCompleted = true;
-      booking_id = completedBooking.id;
-    } else if (completedBooking) {
-      // Nếu có nhiều booking, kiểm tra từng cái
-      const bookings = await Booking.findAll({
+      booking_id = completedBookings[0].id;
+    } else {
+      // Nếu không có completed booking, kiểm tra booking confirmed đã qua thời gian
+      const confirmedBookings = await Booking.findAll({
         where: {
           user_id,
-          status: 'completed',
+          status: 'confirmed',
+          payment_status: 'paid'
         },
+        include: [{
+          model: TimeSlot,
+          as: 'timeSlots',
+          include: [{
+            model: SubField,
+            as: 'subfield',
+            where: { field_id: field_id },
+            required: true
+          }],
+          required: true
+        }]
       });
-      for (const b of bookings) {
-        if (b.booking_metadata?.fieldId == field_id) {
+      
+      // Kiểm tra và tự động cập nhật booking đã qua thời gian
+      for (const booking of confirmedBookings) {
+        const wasUpdated = await BookingStatusService.checkAndUpdateBookingToCompleted(booking.id);
+        if (wasUpdated) {
           hasCompleted = true;
-          booking_id = b.id;
+          booking_id = booking.id;
           break;
         }
       }
+      
+      // Fallback: kiểm tra qua metadata
+      if (!hasCompleted) {
+        const allCompletedBookings = await Booking.findAll({
+          where: {
+            user_id,
+            status: 'completed',
+          },
+        });
+        
+        for (const booking of allCompletedBookings) {
+          const metadataFieldId = booking.booking_metadata?.fieldId || 
+                                 booking.booking_metadata?.field_id ||
+                                 booking.booking_metadata?.fieldID;
+                                 
+          if (String(metadataFieldId) === String(field_id)) {
+            hasCompleted = true;
+            booking_id = booking.id;
+            break;
+          }
+        }
+      }
     }
+    
     if (!hasCompleted) {
       return res.status(403).json({
         success: false,
-        message: 'Chỉ được review khi đã có ít nhất 1 booking hoàn thành cho sân này.',
+        message: 'Chỉ được review khi đã hoàn thành sử dụng dịch vụ tại sân này.',
       });
     }
 

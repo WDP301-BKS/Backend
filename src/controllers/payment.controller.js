@@ -766,10 +766,10 @@ class PaymentController {
       try {
         if (type === 'package') {
           // Thanh toán mua package
-          const userId = session.metadata?.userId;
-          const packageType = session.metadata?.packageType;
+          const userId = session.metadata?.user_id;
+          const packageType = session.metadata?.package_type;
           if (!userId || !packageType) {
-            logger.error('Missing userId or packageType in session metadata for package payment');
+            logger.error('Missing user_id or package_type in session metadata for package payment');
             await transaction.rollback();
             return;
           }
@@ -794,8 +794,13 @@ class PaymentController {
           }
           
           // Thêm thời gian của gói mới
-          const months = packageType === 'premium' ? 6 : 1;
-          newExpireDate.setMonth(newExpireDate.getMonth() + months);
+          if (packageType === 'premium') {
+            // Premium: 365 days (1 year)
+            newExpireDate.setDate(newExpireDate.getDate() + 365);
+          } else {
+            // Basic: 30 days
+            newExpireDate.setDate(newExpireDate.getDate() + 30);
+          }
           
           // Cập nhật thông tin package cho user
           await user.update({
@@ -2584,59 +2589,41 @@ class PaymentController {
   // Get package status for current user
   async getPackageStatus(req, res) {
     try {
+      console.log('getPackageStatus: Starting method');
       const userId = req.user.id;
+      console.log('getPackageStatus: Got userId:', userId);
       
-      const user = await User.findByPk(userId, {
-        attributes: ['id', 'package_type', 'package_expire_date', 'package_purchase_date'],
-        include: [{
-          model: Field,
-          as: 'ownedFields',
-          attributes: ['id', 'is_verified'],
-          required: false
-        }]
-      });
-
-      if (!user) {
-        return res.status(404).json(responseFormatter.error({
-          code: 'USER_NOT_FOUND',
-          message: 'Không tìm thấy thông tin người dùng'
-        }));
-      }
-
-      const packageType = user.package_type || 'none';
-      const hasPackage = packageType !== 'none';
-      const expireDate = user.package_expire_date ? new Date(user.package_expire_date) : null;
-      const purchaseDate = user.package_purchase_date ? new Date(user.package_purchase_date) : null;
-
-      let packageStatus = {
-        hasPackage,
-        packageType,
+      // Simplified version to avoid model issues
+      const packageStatus = {
+        hasPackage: req.user.package_type !== 'none',
+        packageType: req.user.package_type || 'none',
         isExpired: false,
         isExpiringSoon: false,
         daysUntilExpiry: 0,
-        expireDate: expireDate ? expireDate.toISOString() : null,
-        purchaseDate: purchaseDate ? purchaseDate.toISOString() : null,
+        expireDate: req.user.package_expire_date || null,
+        purchaseDate: req.user.package_purchase_date || null,
         fieldsAffected: 0
       };
 
-      if (hasPackage && expireDate) {
+      // Calculate expiry information if user has a package
+      if (packageStatus.hasPackage && req.user.package_expire_date) {
+        const expireDate = new Date(req.user.package_expire_date);
         const now = new Date();
         const isExpired = expireDate < now;
         const daysUntilExpiry = Math.ceil((expireDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
         const isExpiringSoon = !isExpired && daysUntilExpiry <= 7;
 
-        // Đếm số sân bị ảnh hưởng
-        const fieldsAffected = user.ownedFields ? user.ownedFields.length : 0;
-
-        packageStatus = {
-          ...packageStatus,
-          isExpired,
-          isExpiringSoon,
-          daysUntilExpiry: Math.max(0, daysUntilExpiry),
-          fieldsAffected
-        };
+        packageStatus.isExpired = isExpired;
+        packageStatus.isExpiringSoon = isExpiringSoon;
+        packageStatus.daysUntilExpiry = Math.max(0, daysUntilExpiry);
+        packageStatus.expireDate = expireDate.toISOString();
       }
 
+      if (req.user.package_purchase_date) {
+        packageStatus.purchaseDate = new Date(req.user.package_purchase_date).toISOString();
+      }
+
+      console.log('getPackageStatus: About to return response:', packageStatus);
       return res.json(responseFormatter.success(packageStatus));
     } catch (error) {
       logger.error('Error in getPackageStatus:', error);
