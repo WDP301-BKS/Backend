@@ -41,7 +41,7 @@ app.use(cors({
     'http://127.0.0.1:5173'
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-correlation-id'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-correlation-id', 'Cache-Control', 'Pragma'],
   exposedHeaders: ['x-correlation-id'],
   credentials: true,
   preflightContinue: false,
