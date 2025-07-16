@@ -857,8 +857,67 @@ class PaymentController {
             status: 'confirmed',
             payment_status: 'paid'
           }, { transaction });
-          
           logger.info('Booking updated successfully to confirmed status');
+
+          // Gửi thông báo cho user và chủ sân khi payment_status chuyển sang 'paid'
+          try {
+            // Lấy thông tin field, user, ownerId
+            const fieldId = booking.booking_metadata?.fieldId;
+            let field = null;
+            if (fieldId) {
+              field = await Field.findByPk(fieldId, {
+                attributes: ['id', 'name', 'owner_id'],
+                include: [
+                  { model: User, as: 'owner', attributes: ['id', 'name'] }
+                ],
+                transaction
+              });
+            }
+            const user = await User.findByPk(booking.user_id, { transaction });
+            const ownerId = field?.owner_id;
+            const ownerName = field?.owner?.name || '';
+            const notificationService = require('../services/notification.service');
+            // Lấy tên sân ưu tiên từ field, fallback booking_metadata
+            const fieldName = field?.name || booking.booking_metadata?.fieldName || '';
+            const notificationData = {
+              bookingId: booking.id,
+              fieldId: field?.id,
+              fieldName: fieldName,
+              amount: booking.total_price,
+              paymentMethod: booking.payment_method || '',
+              userId: user?.id,
+              userName: user?.name,
+              ownerId: ownerId,
+              ownerName: ownerName,
+              type: 'payment_succeeded',
+              message: `Thanh toán thành công cho đơn đặt sân ${fieldName}`
+            };
+            // Gửi thông báo cho user
+            if (notificationService?.createNotification && user?.id) {
+              await notificationService.createNotification(
+                user.id,
+                'Thanh toán thành công',
+                notificationData.message
+              );
+            }
+            // Gửi thông báo cho chủ sân
+            if (notificationService?.createNotification && ownerId) {
+              const ownerNotification = await notificationService.createNotification(
+                ownerId,
+                'Thanh toán thành công',
+                `Có đơn đặt sân tại ${fieldName} đã được thanh toán thành công.`
+              );
+              // Emit realtime notification for owner (field owner) giống như booking.controller.js
+              try {
+                const { emitNewNotification } = require('../config/socket.config');
+                if (emitNewNotification) emitNewNotification([ownerId], ownerNotification);
+              } catch (realtimeErr) {
+                logger.error('Error emitting realtime notification to owner:', realtimeErr);
+              }
+            }
+          } catch (notifyErr) {
+            logger.error('Error sending payment succeeded notification:', notifyErr);
+          }
           
           // Update payment record với thông tin đầy đủ từ session
           const updateData = {

@@ -581,6 +581,71 @@ const cancelBooking = async (req, res) => {
                     : 'Your booking has been cancelled successfully'
             });
 
+            // ==== Gửi notification realtime cho user và chủ sân khi hủy booking (kèm data chi tiết) ====
+            const { createNotification } = require('../services/notification.service');
+            const { emitNewNotification } = require('../config/socket.config');
+            // Lấy thông tin booking chi tiết để lấy fieldId, ownerId
+            const bookingDetail = await Booking.findByPk(booking.id, {
+                include: [
+                    {
+                        model: TimeSlot,
+                        as: 'timeSlots',
+                        include: [{
+                            model: SubField,
+                            as: 'subfield',
+                            include: [{
+                                model: Field,
+                                as: 'field',
+                                attributes: ['id', 'name', 'owner_id']
+                            }]
+                        }]
+                    }
+                ]
+            });
+            let fieldName = '';
+            let ownerId = null;
+            if (
+                bookingDetail &&
+                bookingDetail.timeSlots &&
+                bookingDetail.timeSlots.length > 0 &&
+                bookingDetail.timeSlots[0].subfield &&
+                bookingDetail.timeSlots[0].subfield.field
+            ) {
+                fieldName = bookingDetail.timeSlots[0].subfield.field.name;
+                ownerId = bookingDetail.timeSlots[0].subfield.field.owner_id;
+            }
+            // Gửi notification cho user
+            const userNotifyMsg = `Bạn đã hủy đặt sân${fieldName ? ' ' + fieldName : ''} thành công.`;
+            const userNotification = await createNotification(
+                booking.user_id,
+                'Hủy đặt sân thành công',
+                userNotifyMsg,
+                {
+                    bookingId: booking.id,
+                    fieldName,
+                    refundAmount,
+                    refundPercentage,
+                    cancellationReason: reason
+                }
+            );
+            if (emitNewNotification && booking.user_id) emitNewNotification([booking.user_id], userNotification);
+            // Gửi notification cho chủ sân nếu có
+            if (ownerId) {
+                const ownerNotifyMsg = `Khách hàng đã hủy đặt sân${fieldName ? ' ' + fieldName : ''}.`;
+                const ownerNotification = await createNotification(
+                    ownerId,
+                    'Khách hàng hủy đặt sân',
+                    ownerNotifyMsg,
+                    {
+                        bookingId: booking.id,
+                        fieldName,
+                        refundAmount,
+                        refundPercentage,
+                        cancellationReason: reason
+                    }
+                );
+                emitNewNotification([ownerId], ownerNotification);
+            }
             console.log('✅ Real-time notifications sent for booking cancellation:', booking.id);
 
         } catch (socketError) {
@@ -615,7 +680,6 @@ const cancelBooking = async (req, res) => {
 
     } catch (error) {
         console.error('Error in cancelBooking:', error);
-        
         // Log detailed error information for debugging
         console.error('Detailed error context:', {
             bookingId: req.params.id,
@@ -628,15 +692,12 @@ const cancelBooking = async (req, res) => {
                 code: error.code
             }
         });
-        
         performanceMonitor.endOperation(operationId, { error: error.message });
         performanceMonitor.monitorBookingOperation('cancel', req.params.id, 0, false, error.message);
-        
         // Provide more specific error messages based on error type
         let errorMessage = 'Đã có lỗi xảy ra khi hủy đặt sân';
         let errorCode = 'INTERNAL_SERVER_ERROR';
         let statusCode = 500;
-        
         if (error.name === 'TypeError') {
             if (error.message && error.message.includes('is not a constructor')) {
                 errorMessage = 'Lỗi cấu hình hệ thống. Vui lòng liên hệ hỗ trợ.';
@@ -654,13 +715,11 @@ const cancelBooking = async (req, res) => {
             errorMessage = 'Lỗi kết nối cơ sở dữ liệu. Vui lòng thử lại sau.';
             errorCode = 'DATABASE_ERROR';
         }
-        
         // For client-friendly error message on frontend
         console.debug(errorMessage, {
             service: 'sports-field-api',
             statusCode: errorCode
         });
-        
         return res.status(statusCode).json(responseFormatter.error({
             code: errorCode,
             message: errorMessage,
