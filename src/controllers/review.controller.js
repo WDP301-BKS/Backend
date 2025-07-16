@@ -1,4 +1,4 @@
-const { Review, Field, User, Booking, TimeSlot, SubField } = require('../models');
+const { Review, Field, User, Booking, TimeSlot, SubField, ReviewReply } = require('../models');
 const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
@@ -219,15 +219,51 @@ const getReviewsByField = async (req, res) => {
       include: [
         { model: User, attributes: ['id', 'name', 'profileImage'] },
         { model: Field, attributes: ['id', 'name'] },
+        { 
+          model: ReviewReply,
+          as: 'reply',
+          required: false,
+          attributes: ['id', 'content', 'created_at']
+        }
       ],
       order: [['created_at', 'DESC']],
     });
 
-    // Đảm bảo images luôn là array string (nếu không có thì trả về mảng rỗng)
+    // Helper function to calculate time ago
+    const getTimeAgo = (date) => {
+      const now = new Date();
+      const diff = now - new Date(date);
+      const minutes = Math.floor(diff / 60000);
+      const hours = Math.floor(diff / 3600000);
+      const days = Math.floor(diff / 86400000);
+      
+      if (minutes < 60) {
+        return `${minutes} phút trước`;
+      } else if (hours < 24) {
+        return `${hours} giờ trước`;
+      } else if (days < 7) {
+        return `${days} ngày trước`;
+      } else {
+        return new Date(date).toLocaleDateString('vi-VN');
+      }
+    };
+
+    // Đảm bảo images luôn là array string và format reply
     const reviewsWithImages = reviews.map(r => {
       let images = r.images;
       if (!Array.isArray(images)) images = [];
-      return { ...r.toJSON(), images };
+      
+      const reviewData = { ...r.toJSON(), images };
+      
+      // Format reply nếu có
+      if (reviewData.reply) {
+        reviewData.reply = {
+          ...reviewData.reply,
+          timeAgo: getTimeAgo(reviewData.reply.created_at)
+        };
+      }
+      
+      return reviewData;
     });
 
     // Kiểm tra xem người dùng đã đánh giá sân này chưa
@@ -260,7 +296,7 @@ const getReviewsByField = async (req, res) => {
       canReview = !hasReviewed && !!completedBooking;
     }
 
-    if (!reviews || reviews.length === 0) {
+    if (!reviewsWithImages || reviewsWithImages.length === 0) {
       return res.status(200).json({
         success: true,
         message: 'Chưa có đánh giá nào cho sân này',

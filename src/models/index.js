@@ -7,6 +7,7 @@ const Payment = require('./payment.model');
 const TimeSlot = require('./timeslot.model');
 const Promotion = require('./promotion.model');
 const Review = require('./review.model');
+const ReviewReply = require('./review_reply.model');
 const Favorite = require('./favorite.model');
 const Notification = require('./notification.model');
 const BlacklistUser = require('./blacklist_user.model');
@@ -25,6 +26,10 @@ Booking.belongsTo(User, { foreignKey: 'user_id', required: false }); // Allow nu
 
 User.hasMany(Review, { foreignKey: 'user_id' });
 Review.belongsTo(User, { foreignKey: 'user_id' });
+
+// Review-ReviewReply relationship
+Review.hasOne(ReviewReply, { foreignKey: 'reviewId', as: 'reply' });
+ReviewReply.belongsTo(Review, { foreignKey: 'reviewId', as: 'review' });
 
 User.hasMany(Favorite, { foreignKey: 'user_id' });
 Favorite.belongsTo(User, { foreignKey: 'user_id' });
@@ -103,6 +108,7 @@ module.exports = {
   TimeSlot,
   Promotion,
   Review,
+  ReviewReply,
   Favorite,
   Notification,
   BlacklistUser,

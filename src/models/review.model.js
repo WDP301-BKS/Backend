@@ -37,4 +37,5 @@ const Review = sequelize.define('review', {
   updatedAt: false
 });
 
+// Associations will be defined in models/index.js
 module.exports = Review;

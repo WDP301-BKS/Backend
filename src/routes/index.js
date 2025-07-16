@@ -13,6 +13,7 @@ const fieldPricingRuleRoutes = require('./field_pricing_rule.routes');
 const maintenanceRoutes = require('./maintenance.routes');
 const secureImageRoutes = require('./secureImage.routes');
 const notificationRoutes = require('./notification.routes');
+const revenueRoutes = require('./revenue.routes');
 
 const adminRoutes = require('./admin.routes');
 
@@ -59,5 +60,8 @@ router.use('/maintenance', maintenanceRoutes);
 
 // Mount secure image routes
 router.use('/secure-images', secureImageRoutes);
+
+// Mount revenue routes
+router.use('/revenue', revenueRoutes);
 
 module.exports = router;
