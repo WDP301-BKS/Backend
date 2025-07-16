@@ -795,8 +795,8 @@ class PaymentController {
           
           // Thêm thời gian của gói mới
           if (packageType === 'premium') {
-            // Premium: 365 days (1 year)
-            newExpireDate.setDate(newExpireDate.getDate() + 365);
+            // Premium: 180 days (6 months)
+            newExpireDate.setDate(newExpireDate.getDate() + 180);
           } else {
             // Basic: 30 days
             newExpireDate.setDate(newExpireDate.getDate() + 30);
@@ -810,7 +810,29 @@ class PaymentController {
           }, { transaction });
           logger.info('User package updated successfully:', userId);
           await transaction.commit();
-          // TODO: Gửi thông báo, email, v.v. cho user về việc mua package thành công
+          
+          // Gửi email thông báo mua gói thành công
+          try {
+            const { sendPackagePurchaseSuccessEmail } = require('../utils/emailService');
+            
+            // Chuẩn bị thông tin gói dịch vụ cho email
+            const packageDetails = {
+              name: session.metadata?.package_name || (packageType === 'premium' ? 'Gói Premium' : 'Gói Cơ Bản'),
+              duration: session.metadata?.package_duration || (packageType === 'premium' ? '6 tháng' : '1 tháng'),
+              amount: session.amount_total, // VND không có cents, không cần chia cho 100
+              features: packageType === 'premium' 
+                ? 'Đăng được 5 sân, Analytics, Priority support'
+                : 'Đăng sân cơ bản, Quản lý booking',
+              purchaseDate: new Date().toISOString(),
+              expireDate: newExpireDate.toISOString()
+            };
+            
+            await sendPackagePurchaseSuccessEmail(user.email, user.name, packageDetails);
+            logger.info('Package purchase success email sent to:', user.email);
+          } catch (emailError) {
+            logger.error('Failed to send package purchase success email:', emailError);
+            // Don't fail the webhook if email fails
+          }
         } else {
           // Handle booking payment
           // Find the booking using client_reference_id
@@ -1091,10 +1113,54 @@ class PaymentController {
     try {
       logger.info('Processing expired checkout session:', session.id);
       
+      // Xác định loại giao dịch từ metadata
+      const type = session.metadata?.type || 'booking';
+      
       // Use transaction to ensure data consistency
       const transaction = await sequelize.transaction();
       
       try {
+        if (type === 'package') {
+          // Xử lý package payment thất bại
+          const userId = session.metadata?.user_id;
+          const packageType = session.metadata?.package_type;
+          
+          if (userId && packageType) {
+            const user = await User.findByPk(userId, { transaction });
+            if (user) {
+              // Gửi email thông báo thanh toán package thất bại
+              try {
+                const { sendPackagePurchaseFailedEmail } = require('../utils/emailService');
+                
+                const packageDetails = {
+                  name: session.metadata?.package_name || (packageType === 'premium' ? 'Gói Premium' : 'Gói Cơ Bản'),
+                  duration: session.metadata?.package_duration || (packageType === 'premium' ? '365 ngày' : '30 ngày'),
+                  amount: session.amount_total, // VND không có cents, không cần chia cho 100
+                  features: packageType === 'premium' 
+                    ? 'Đăng sân không giới hạn, Analytics, Priority support'
+                    : 'Đăng sân cơ bản, Quản lý booking'
+                };
+                
+                await sendPackagePurchaseFailedEmail(
+                  user.email, 
+                  user.name, 
+                  packageDetails,
+                  'Phiên thanh toán đã hết hạn. Vui lòng thử lại.'
+                );
+                logger.info('Package purchase failed email sent to:', user.email);
+              } catch (emailError) {
+                logger.error('Failed to send package purchase failed email:', emailError);
+                // Don't fail the webhook if email fails
+              }
+            }
+          }
+          
+          await transaction.commit();
+          logger.info('Package payment expired session processed:', session.id);
+          return;
+        }
+        
+        // Handle booking payment expiry (existing logic)
         const booking = await Booking.findByPk(session.client_reference_id, { transaction });
         if (!booking) {
           logger.error('Booking not found for expired session:', session.id);
@@ -1183,7 +1249,64 @@ class PaymentController {
     try {
       logger.info('Processing failed payment intent:', paymentIntent.id);
       
-      // Use PaymentService to handle the payment failure
+      // Check if this is a package payment from metadata
+      if (paymentIntent.metadata?.type === 'package') {
+        const userId = paymentIntent.metadata?.user_id;
+        const packageType = paymentIntent.metadata?.package_type;
+        
+        if (userId && packageType) {
+          try {
+            const user = await User.findByPk(userId);
+            if (user) {
+              // Gửi email thông báo thanh toán package thất bại
+              const { sendPackagePurchaseFailedEmail } = require('../utils/emailService');
+              
+              const packageDetails = {
+                name: paymentIntent.metadata?.package_name || (packageType === 'premium' ? 'Gói Premium' : 'Gói Cơ Bản'),
+                duration: paymentIntent.metadata?.package_duration || (packageType === 'premium' ? '365 ngày' : '30 ngày'),
+                amount: paymentIntent.amount, // VND không có cents, không cần chia cho 100
+                features: packageType === 'premium' 
+                  ? 'Đăng sân không giới hạn, Analytics, Priority support'
+                  : 'Đăng sân cơ bản, Quản lý booking'
+              };
+              
+              // Determine failure reason from payment intent
+              let failureReason = 'Thanh toán không thành công';
+              if (paymentIntent.last_payment_error?.message) {
+                failureReason = paymentIntent.last_payment_error.message;
+              } else if (paymentIntent.last_payment_error?.code) {
+                switch (paymentIntent.last_payment_error.code) {
+                  case 'card_declined':
+                    failureReason = 'Thẻ bị từ chối. Vui lòng kiểm tra thông tin thẻ hoặc liên hệ ngân hàng.';
+                    break;
+                  case 'insufficient_funds':
+                    failureReason = 'Tài khoản không đủ số dư. Vui lòng kiểm tra số dư tài khoản.';
+                    break;
+                  case 'expired_card':
+                    failureReason = 'Thẻ đã hết hạn. Vui lòng sử dụng thẻ khác.';
+                    break;
+                  case 'incorrect_cvc':
+                    failureReason = 'Mã CVC không chính xác. Vui lòng kiểm tra lại.';
+                    break;
+                  case 'processing_error':
+                    failureReason = 'Lỗi xử lý thanh toán. Vui lòng thử lại sau.';
+                    break;
+                  default:
+                    failureReason = `Thanh toán thất bại: ${paymentIntent.last_payment_error.code}`;
+                }
+              }
+              
+              await sendPackagePurchaseFailedEmail(user.email, user.name, packageDetails, failureReason);
+              logger.info('Package purchase failed email sent to:', user.email);
+            }
+          } catch (emailError) {
+            logger.error('Failed to send package purchase failed email:', emailError);
+            // Don't fail the webhook if email fails
+          }
+        }
+      }
+      
+      // Use PaymentService to handle the payment failure (existing logic for bookings)
       await PaymentService.handlePaymentFailed(paymentIntent);
       logger.info('Payment failure processed successfully via PaymentService');
       
@@ -2488,12 +2611,12 @@ class PaymentController {
         basic: {
           name: 'Gói Cơ Bản',
           features: 'Đăng sân cơ bản, Quản lý booking',
-          duration: '30 ngày'
+          duration: '1 tháng'
         },
         premium: {
           name: 'Gói Premium',
-          features: 'Đăng sân không giới hạn, Analytics, Priority support',
-          duration: '365 ngày'
+          features: 'Đăng 5 sân, Analytics, Priority support',
+          duration: '6 tháng'
         }
       };
 

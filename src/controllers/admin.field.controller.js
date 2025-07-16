@@ -219,7 +219,15 @@ const verifyField = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const field = await Field.findByPk(id);
+        const field = await Field.findByPk(id, {
+            include: [
+                {
+                    model: User,
+                    as: 'owner',
+                    attributes: ['id', 'name', 'email', 'phone']
+                }
+            ]
+        });
         
         if (!field) {
             return res.status(404).json({
@@ -254,6 +262,25 @@ const verifyField = async (req, res) => {
             console.error('[Notify owner verifyField] Error sending notification:', err);
         }
 
+        // ==== Gửi email thông báo cho chủ sân khi duyệt sân ====
+        try {
+            const { sendFieldApprovalEmail } = require('../utils/emailService');
+            if (field.owner && field.owner.email) {
+                await sendFieldApprovalEmail(
+                    field.owner.email,
+                    field.owner.name,
+                    field.name,
+                    field.id
+                );
+                console.log(`Approval email sent to ${field.owner.email} for field ${field.name}`);
+            } else {
+                console.warn(`No email found for field owner ${field.owner_id}`);
+            }
+        } catch (emailErr) {
+            console.error('[Email] Error sending field approval email:', emailErr);
+            // Don't fail the main operation if email fails
+        }
+
         return res.json({
             success: true,
             message: 'Sân bóng đã được duyệt thành công',
@@ -278,7 +305,15 @@ const rejectField = async (req, res) => {
         const { id } = req.params;
         const { reason } = req.body; // Optional rejection reason
 
-        const field = await Field.findByPk(id);
+        const field = await Field.findByPk(id, {
+            include: [
+                {
+                    model: User,
+                    as: 'owner',
+                    attributes: ['id', 'name', 'email', 'phone']
+                }
+            ]
+        });
         
         if (!field) {
             return res.status(404).json({
@@ -290,19 +325,57 @@ const rejectField = async (req, res) => {
             });
         }
 
+        const rejectionReason = reason || 'Không đáp ứng tiêu chuẩn';
+
         // Set is_verified to null to indicate rejection
         await field.update({ 
             is_verified: null,
-            rejection_reason: reason || 'Không đáp ứng tiêu chuẩn'
+            rejection_reason: rejectionReason
         });
 
         // Log the rejection action
-        logger.info(`Admin ${req.user.id} rejected field ${id}. Reason: ${reason || 'No reason provided'}`);
+        logger.info(`Admin ${req.user.id} rejected field ${id}. Reason: ${rejectionReason}`);
+
+        // ==== Gửi notification realtime cho chủ sân khi từ chối sân ====
+        try {
+            const { createNotification } = require('../services/notification.service');
+            const { emitNewNotification } = require('../config/socket.config');
+            const ownerId = field.owner_id || (field.owner && field.owner.id);
+            let notifyMsg = `Sân bóng của bạn (${field.name}) đã bị từ chối. Lý do: ${rejectionReason}`;
+            const notification = await createNotification(
+                ownerId,
+                'Sân bóng bị từ chối',
+                notifyMsg
+            );
+            if (emitNewNotification && ownerId) emitNewNotification([ownerId], notification);
+        } catch (err) {
+            console.error('[Notify owner rejectField] Error sending notification:', err);
+        }
+
+        // ==== Gửi email thông báo cho chủ sân khi từ chối sân ====
+        try {
+            const { sendFieldRejectionEmail } = require('../utils/emailService');
+            if (field.owner && field.owner.email) {
+                await sendFieldRejectionEmail(
+                    field.owner.email,
+                    field.owner.name,
+                    field.name,
+                    field.id,
+                    rejectionReason
+                );
+                console.log(`Rejection email sent to ${field.owner.email} for field ${field.name}`);
+            } else {
+                console.warn(`No email found for field owner ${field.owner_id}`);
+            }
+        } catch (emailErr) {
+            console.error('[Email] Error sending field rejection email:', emailErr);
+            // Don't fail the main operation if email fails
+        }
 
         return res.json({
             success: true,
             message: 'Sân bóng đã bị từ chối',
-            data: { id: field.id, is_verified: field.is_verified }
+            data: { id: field.id, is_verified: field.is_verified, rejection_reason: rejectionReason }
         });
     } catch (error) {
         console.error('Error in rejectField:', error);

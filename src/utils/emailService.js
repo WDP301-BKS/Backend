@@ -782,11 +782,465 @@ const sendMaintenanceCancellationEmail = async (to, customerName, bookingDetails
   return sendEmail(to, subject, text, html);
 };
 
+/**
+ * Gửi email thông báo phê duyệt sân
+ */
+const sendFieldApprovalEmail = async (to, ownerName, fieldDetails) => {
+  console.log('📧 EMAIL SERVICE: sendFieldApprovalEmail called');
+  console.log('- To:', to);
+  console.log('- Owner Name:', ownerName);
+  console.log('- Field Details:', JSON.stringify(fieldDetails, null, 2));
+  
+  const subject = 'Chúc mừng! Sân của bạn đã được phê duyệt';
+  
+  const text = `Xin chào ${ownerName},\n\nChúc mừng! Sân "${fieldDetails.name}" của bạn đã được phê duyệt và có thể hoạt động.\n\nThông tin sân:\n- Tên sân: ${fieldDetails.name}\n- Địa chỉ: ${fieldDetails.address}\n- Loại sân: ${fieldDetails.fieldType}\n- Giá: ${fieldDetails.pricePerHour?.toLocaleString('vi-VN')}đ/giờ\n\nSân của bạn hiện đã có thể nhận đặt chỗ từ khách hàng.\n\nTrân trọng,\nĐội ngũ quản trị Football Field Booking`;
+  
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background-color: #dcfce7; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+        <h2 style="color: #16a34a; margin: 0;">🎉 Chúc mừng! Sân đã được phê duyệt</h2>
+      </div>
+      
+      <p>Xin chào <strong>${ownerName}</strong>,</p>
+      
+      <p>Chúng tôi vui mừng thông báo rằng sân <strong>"${fieldDetails.name}"</strong> của bạn đã được phê duyệt và có thể bắt đầu hoạt động!</p>
+      
+      <div style="background-color: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h3 style="color: #374151; margin-top: 0;">📋 Thông tin sân:</h3>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: 500;">Tên sân:</td>
+            <td style="padding: 8px 0; color: #111827; font-weight: 600;">${fieldDetails.name}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: 500;">Địa chỉ:</td>
+            <td style="padding: 8px 0; color: #111827; font-weight: 600;">${fieldDetails.address}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: 500;">Loại sân:</td>
+            <td style="padding: 8px 0; color: #111827; font-weight: 600;">${fieldDetails.fieldType}</td>
+          </tr>
+          ${fieldDetails.pricePerHour ? `
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: 500;">Giá thuê:</td>
+            <td style="padding: 8px 0; color: #16a34a; font-weight: 600;">${fieldDetails.pricePerHour.toLocaleString('vi-VN')}đ/giờ</td>
+          </tr>` : ''}
+        </table>
+      </div>
+      
+      <div style="background-color: #dbeafe; padding: 15px; border-radius: 8px; margin: 20px 0;">
+        <p style="color: #1e40af; margin: 0;">
+          <strong>✨ Sân của bạn đã sẵn sàng:</strong> Khách hàng giờ đây có thể tìm thấy và đặt sân của bạn trên hệ thống. 
+          Hãy đảm bảo sân luôn trong tình trạng tốt nhất để phục vụ khách hàng!
+        </p>
+      </div>
+      
+      <p>Chúc bạn kinh doanh thành công!</p>
+      
+      <p>Trân trọng,<br>
+      <strong>Đội ngũ quản trị Football Field Booking</strong></p>
+    </div>
+  `;
+
+  return sendEmail(to, subject, text, html);
+};
+
+/**
+ * Gửi email thông báo từ chối sân
+ */
+const sendFieldRejectionEmail = async (to, ownerName, fieldDetails, rejectionReason) => {
+  console.log('📧 EMAIL SERVICE: sendFieldRejectionEmail called');
+  console.log('- To:', to);
+  console.log('- Owner Name:', ownerName);
+  console.log('- Field Details:', JSON.stringify(fieldDetails, null, 2));
+  console.log('- Rejection Reason:', rejectionReason);
+  
+  const subject = 'Thông báo về việc từ chối phê duyệt sân';
+  
+  const text = `Xin chào ${ownerName},\n\nChúng tôi rất tiếc phải thông báo rằng sân "${fieldDetails.name}" của bạn chưa được phê duyệt.\n\nThông tin sân:\n- Tên sân: ${fieldDetails.name}\n- Địa chỉ: ${fieldDetails.address}\n- Loại sân: ${fieldDetails.fieldType}\n\nLý do từ chối: ${rejectionReason}\n\nBạn có thể chỉnh sửa thông tin sân và gửi lại yêu cầu phê duyệt.\n\nTrân trọng,\nĐội ngũ quản trị Football Field Booking`;
+  
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background-color: #fee2e2; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+        <h2 style="color: #dc2626; margin: 0;">❌ Thông báo từ chối phê duyệt sân</h2>
+      </div>
+      
+      <p>Xin chào <strong>${ownerName}</strong>,</p>
+      
+      <p>Chúng tôi rất tiếc phải thông báo rằng sân <strong>"${fieldDetails.name}"</strong> của bạn chưa được phê duyệt.</p>
+      
+      <div style="background-color: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h3 style="color: #374151; margin-top: 0;">📋 Thông tin sân:</h3>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: 500;">Tên sân:</td>
+            <td style="padding: 8px 0; color: #111827; font-weight: 600;">${fieldDetails.name}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: 500;">Địa chỉ:</td>
+            <td style="padding: 8px 0; color: #111827; font-weight: 600;">${fieldDetails.address}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-weight: 500;">Loại sân:</td>
+            <td style="padding: 8px 0; color: #111827; font-weight: 600;">${fieldDetails.fieldType}</td>
+          </tr>
+        </table>
+      </div>
+      
+      <div style="background-color: #fef2f2; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #dc2626;">
+        <h3 style="color: #dc2626; margin-top: 0;">📝 Lý do từ chối:</h3>
+        <p style="color: #991b1b; margin: 0; font-weight: 500;">${rejectionReason}</p>
+      </div>
+      
+      <div style="background-color: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px 0;">
+        <p style="color: #92400e; margin: 0;">
+          <strong>💡 Hướng dẫn tiếp theo:</strong> Bạn có thể chỉnh sửa thông tin sân theo các yêu cầu trên 
+          và gửi lại yêu cầu phê duyệt. Chúng tôi sẽ xem xét lại một cách nhanh chóng.
+        </p>
+      </div>
+      
+      <p>Nếu bạn có thắc mắc gì, vui lòng liên hệ với chúng tôi.</p>
+      
+      <p>Trân trọng,<br>
+      <strong>Đội ngũ quản trị Football Field Booking</strong></p>
+    </div>
+  `;
+
+  return sendEmail(to, subject, text, html);
+};
+
+/**
+ * Gửi email thông báo mua gói dịch vụ thành công
+ * @param {string} to - Email của chủ sân
+ * @param {string} ownerName - Tên chủ sân
+ * @param {Object} packageDetails - Chi tiết gói dịch vụ
+ * @returns {Promise} - Promise chứa kết quả gửi email
+ */
+const sendPackagePurchaseSuccessEmail = async (to, ownerName, packageDetails) => {
+  try {
+    const subject = '🎉 Mua gói dịch vụ thành công - Chào mừng bạn đến với Football Field Booking!';
+    
+    const formatCurrency = (amount) => {
+      return new Intl.NumberFormat('vi-VN', { 
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0 
+      }).format(amount) + 'đ';
+    };
+
+    const formatDate = (dateStr) => {
+      if (!dateStr) return 'N/A';
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('vi-VN', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+    };
+
+    const text = `🎉 MUA GÓI DỊCH VỤ THÀNH CÔNG!
+
+Xin chào ${ownerName},
+
+Chúc mừng! Bạn đã mua gói dịch vụ thành công trên hệ thống Football Field Booking.
+
+📋 THÔNG TIN GÓI DỊCH VỤ:
+- Tên gói:  ${packageDetails.name}
+- Thời hạn:  ${packageDetails.duration}
+- Giá:  ${formatCurrency(packageDetails.amount)}
+- Ngày mua:  ${formatDate(packageDetails.purchaseDate)}
+- Ngày hết hạn:  ${formatDate(packageDetails.expireDate)}
+
+✨ TÍNH NĂNG ĐƯỢC KÍCH HOẠT:
+${packageDetails.features}
+
+📌 BƯỚC TIẾP THEO:
+1. Truy cập trang quản lý sân của bạn
+2. Thêm thông tin sân bóng
+3. Bắt đầu nhận đặt chỗ từ khách hàng
+
+Cảm ơn bạn đã tin tưởng và sử dụng dịch vụ của chúng tôi!
+
+Trân trọng,
+Đội ngũ Football Field Booking`;
+
+    const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Mua gói dịch vụ thành công</title>
+    </head>
+    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8f9fa;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 30px 20px; text-align: center;">
+                <div style="background-color: rgba(255,255,255,0.2); border-radius: 50%; width: 80px; height: 80px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center;">
+                    <span style="font-size: 40px;">🎉</span>
+                </div>
+                <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700;">Mua gói thành công!</h1>
+                <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 16px;">Chào mừng bạn đến với Football Field Booking</p>
+            </div>
+
+            <!-- Main Content -->
+            <div style="padding: 30px 20px;">
+                <h2 style="color: #1f2937; margin: 0 0 10px 0; font-size: 24px;">Xin chào <strong style="color: #10b981;">${ownerName}</strong>,</h2>
+                <p style="color: #6b7280; margin: 0 0 30px 0; font-size: 16px; line-height: 1.5;">
+                    Chúc mừng! Bạn đã mua gói dịch vụ thành công trên hệ thống Football Field Booking.
+                </p>
+
+                <!-- Package Details -->
+                <div style="background-color: #f8f9fa; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+                    <h3 style="color: #1f2937; margin: 0 0 20px 0; font-size: 18px; display: flex; align-items: center;">
+                        <span style="margin-right: 10px;">📦</span> Thông tin gói dịch vụ
+                    </h3>
+                    
+                    <div style="space-y: 15px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #e5e7eb;">
+                            <span style="color: #6b7280; font-weight: 500;">Tên gói:</span>
+                            <strong style="color: #1f2937; font-size: 16px;">${packageDetails.name}</strong>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #e5e7eb;">
+                            <span style="color: #6b7280; font-weight: 500;">Thời hạn:</span>
+                            <strong style="color: #1f2937;">${packageDetails.duration}</strong>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #e5e7eb;">
+                            <span style="color: #6b7280; font-weight: 500;">Giá:</span>
+                            <strong style="color: #10b981; font-size: 18px;">${formatCurrency(packageDetails.amount)}</strong>
+                        </div>
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #e5e7eb;">
+                            <span style="color: #6b7280; font-weight: 500;">Ngày mua:</span>
+                            <strong style="color: #1f2937;">${formatDate(packageDetails.purchaseDate)}</strong>
+                        </div>
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0;">
+                            <span style="color: #6b7280; font-weight: 500;">Ngày hết hạn:</span>
+                            <strong style="color: #1f2937;">${formatDate(packageDetails.expireDate)}</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Features -->
+                <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); padding: 20px; border-radius: 12px; margin-bottom: 25px; border-left: 5px solid #3b82f6;">
+                    <h3 style="color: #1e40af; margin: 0 0 15px 0; font-size: 16px;">✨ Tính năng được kích hoạt:</h3>
+                    <p style="color: #1e40af; margin: 0; font-size: 14px; line-height: 1.6;">${packageDetails.features}</p>
+                </div>
+
+                <!-- Next Steps -->
+                <div style="background-color: #fef3c7; border: 1px solid #fed7aa; border-radius: 12px; padding: 20px; margin-bottom: 30px;">
+                    <h4 style="color: #92400e; margin: 0 0 15px 0; font-size: 16px; display: flex; align-items: center;">
+                        <span style="margin-right: 8px;">📌</span> Bước tiếp theo:
+                    </h4>
+                    <ol style="color: #92400e; margin: 0; padding-left: 20px; line-height: 1.6;">
+                        <li style="margin: 8px 0;"><strong>Truy cập trang quản lý</strong> - Vào dashboard chủ sân</li>
+                        <li style="margin: 8px 0;"><strong>Thêm sân bóng</strong> - Upload thông tin và hình ảnh sân</li>
+                        <li style="margin: 8px 0;"><strong>Quản lý booking</strong> - Bắt đầu nhận đặt chỗ từ khách hàng</li>
+                        <li style="margin: 8px 0;"><strong>Theo dõi doanh thu</strong> - Xem báo cáo và thống kê</li>
+                    </ol>
+                </div>
+
+                <!-- Quick Actions -->
+            </div>
+
+            <!-- Footer -->
+            <div style="background-color: #1f2937; padding: 30px 20px; text-align: center;">
+                <h3 style="color: #10b981; margin: 0 0 10px 0; font-size: 20px;">⚽ Football Field Booking</h3>
+                <p style="color: #9ca3af; margin: 0 0 15px 0;">Nền tảng quản lý sân bóng chuyên nghiệp</p>
+                <div style="border-top: 1px solid #374151; padding-top: 20px; margin-top: 20px;">
+                    <p style="color: #6b7280; margin: 0; font-size: 14px;">
+                        © 2025 Football Field Booking. Mọi quyền được bảo lưu.<br>
+                        Đây là email thông báo tự động, vui lòng không trả lời.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+
+    return await sendEmail(to, subject, text, html);
+  } catch (error) {
+    console.error('Error sending package purchase success email:', error);
+    throw error;
+  }
+};
+
+/**
+ * Gửi email thông báo mua gói dịch vụ thất bại
+ * @param {string} to - Email của chủ sân
+ * @param {string} ownerName - Tên chủ sân
+ * @param {Object} packageDetails - Chi tiết gói dịch vụ
+ * @param {string} reason - Lý do thất bại
+ * @returns {Promise} - Promise chứa kết quả gửi email
+ */
+const sendPackagePurchaseFailedEmail = async (to, ownerName, packageDetails, reason = 'Thanh toán không thành công') => {
+  try {
+    const subject = '❌ Thanh toán gói dịch vụ không thành công';
+    
+    const formatCurrency = (amount) => {
+      return new Intl.NumberFormat('vi-VN', { 
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0 
+      }).format(amount) + 'đ';
+    };
+
+    const text = `❌ THANH TOÁN KHÔNG THÀNH CÔNG
+
+Xin chào ${ownerName},
+
+Chúng tôi rất tiếc phải thông báo rằng thanh toán cho gói dịch vụ "${packageDetails.name}" của bạn đã không thành công.
+
+📋 THÔNG TIN GÓI DỊCH VỤ:
+- Tên gói: ${packageDetails.name}
+- Thời hạn: ${packageDetails.duration}
+- Giá: ${formatCurrency(packageDetails.amount)}
+- Lý do: ${reason}
+
+🔄 CÁCH KHẮC PHỤC:
+1. Kiểm tra thông tin thẻ thanh toán
+2. Đảm bảo tài khoản có đủ số dư
+3. Thử lại với phương thức thanh toán khác
+4. Liên hệ ngân hàng nếu vấn đề tiếp tục
+
+Bạn có thể thử lại thanh toán bất cứ lúc nào.
+
+Nếu cần hỗ trợ, vui lòng liên hệ với chúng tôi.
+
+Trân trọng,
+Đội ngũ hỗ trợ Football Field Booking`;
+
+    const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Thanh toán không thành công</title>
+    </head>
+    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8f9fa;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); padding: 30px 20px; text-align: center;">
+                <div style="background-color: rgba(255,255,255,0.2); border-radius: 50%; width: 80px; height: 80px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center;">
+                    <span style="font-size: 40px;">❌</span>
+                </div>
+                <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700;">Thanh toán không thành công</h1>
+                <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 16px;">Có lỗi xảy ra trong quá trình thanh toán</p>
+            </div>
+
+            <!-- Main Content -->
+            <div style="padding: 30px 20px;">
+                <h2 style="color: #1f2937; margin: 0 0 10px 0; font-size: 24px;">Xin chào <strong style="color: #ef4444;">${ownerName}</strong>,</h2>
+                <p style="color: #6b7280; margin: 0 0 30px 0; font-size: 16px; line-height: 1.5;">
+                    Chúng tôi rất tiếc phải thông báo rằng thanh toán cho gói dịch vụ "${packageDetails.name}" của bạn đã không thành công.
+                </p>
+
+                <!-- Error Details -->
+                <div style="background: linear-gradient(135deg, #fef2f2, #fee2e2); padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 5px solid #ef4444;">
+                    <h3 style="color: #991b1b; margin: 0 0 15px 0; font-size: 18px;">⚠️ Chi tiết lỗi:</h3>
+                    <p style="color: #991b1b; margin: 0; font-size: 16px; line-height: 1.6; background-color: rgba(239, 68, 68, 0.1); padding: 15px; border-radius: 8px;">
+                        ${reason}
+                    </p>
+                </div>
+
+                <!-- Package Details -->
+                <div style="background-color: #f8f9fa; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+                    <h3 style="color: #1f2937; margin: 0 0 20px 0; font-size: 18px; display: flex; align-items: center;">
+                        <span style="margin-right: 10px;">📦</span> Thông tin gói dịch vụ
+                    </h3>
+                    
+                    <div style="space-y: 15px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #e5e7eb;">
+                            <span style="color: #6b7280; font-weight: 500;">Tên gói:</span>
+                            <strong style="color: #1f2937; font-size: 16px;">${packageDetails.name}</strong>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #e5e7eb;">
+                            <span style="color: #6b7280; font-weight: 500;">Thời hạn:</span>
+                            <strong style="color: #1f2937;">${packageDetails.duration}</strong>
+                        </div>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0;">
+                            <span style="color: #6b7280; font-weight: 500;">Giá:</span>
+                            <strong style="color: #ef4444; font-size: 18px;">${formatCurrency(packageDetails.amount)}</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Solutions -->
+                <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); padding: 20px; border-radius: 12px; margin-bottom: 25px; border-left: 5px solid #3b82f6;">
+                    <h4 style="color: #1e40af; margin: 0 0 15px 0; font-size: 16px; display: flex; align-items: center;">
+                        <span style="margin-right: 8px;">🔄</span> Cách khắc phục:
+                    </h4>
+                    <ul style="color: #1e40af; margin: 0; padding-left: 20px; line-height: 1.6;">
+                        <li style="margin: 8px 0;">Kiểm tra thông tin thẻ thanh toán (số thẻ, CVV, ngày hết hạn)</li>
+                        <li style="margin: 8px 0;">Đảm bảo tài khoản có đủ số dư</li>
+                        <li style="margin: 8px 0;">Thử lại với phương thức thanh toán khác</li>
+                        <li style="margin: 8px 0;">Liên hệ ngân hàng nếu vấn đề tiếp tục</li>
+                    </ul>
+                </div>
+
+                <!-- Support Contact -->
+                <div style="background-color: #fef3c7; border: 1px solid #fed7aa; border-radius: 12px; padding: 20px; margin-bottom: 30px;">
+                    <h4 style="color: #92400e; margin: 0 0 15px 0; font-size: 16px;">💡 Cần hỗ trợ?</h4>
+                    <p style="color: #92400e; margin: 0 0 15px 0; font-size: 14px;">
+                        Nếu bạn gặp khó khăn với thanh toán hoặc cần hỗ trợ kỹ thuật, đội ngũ của chúng tôi sẵn sàng giúp đỡ.
+                    </p>
+                    <div style="display: flex; justify-content: center; gap: 15px; flex-wrap: wrap;">
+                        <a href="tel:0124456789" style="background-color: #3b82f6; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 500; display: inline-flex; align-items: center;">
+                            📞 Hotline: 0124-456-789
+                        </a>
+                        <a href="mailto:support@footballbooking.com" style="background-color: #6b7280; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 500; display: inline-flex; align-items: center;">
+                            📧 Email hỗ trợ
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Retry Button -->
+                <div style="text-align: center; padding: 20px; background-color: #f1f5f9; border-radius: 12px;">
+                    <h4 style="color: #1f2937; margin: 0 0 15px 0;">🔄 Thử lại thanh toán</h4>
+                    <a href="${process.env.FRONTEND_URL}/owner/service-plans" style="background-color: #ef4444; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 500; display: inline-flex; align-items: center; justify-content: center;">
+                        Thanh toán lại
+                    </a>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background-color: #1f2937; padding: 30px 20px; text-align: center;">
+                <h3 style="color: #ef4444; margin: 0 0 10px 0; font-size: 20px;">⚽ Football Field Booking</h3>
+                <p style="color: #9ca3af; margin: 0 0 15px 0;">Đội ngũ hỗ trợ khách hàng</p>
+                <div style="border-top: 1px solid #374151; padding-top: 20px; margin-top: 20px;">
+                    <p style="color: #6b7280; margin: 0; font-size: 14px;">
+                        © 2025 Football Field Booking. Mọi quyền được bảo lưu.<br>
+                        Đây là email thông báo tự động, vui lòng không trả lời.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+
+    return await sendEmail(to, subject, text, html);
+  } catch (error) {
+    console.error('Error sending package purchase failed email:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   sendEmail,
   sendRegistrationEmail,
   sendPasswordResetEmail,
   sendBookingConfirmationEmail,
   sendOwnerBookingNotificationEmail,
-  sendMaintenanceCancellationEmail
+  sendMaintenanceCancellationEmail,
+  sendFieldApprovalEmail,
+  sendFieldRejectionEmail,
+  sendPackagePurchaseSuccessEmail,
+  sendPackagePurchaseFailedEmail
 };
