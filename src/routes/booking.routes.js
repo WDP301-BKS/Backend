@@ -14,6 +14,7 @@ router.get('/stats', authMiddleware, bookingController.getBookingStats);
 router.post('/test-email', authMiddleware, bookingController.testEmail); // Test email endpoint
 router.post('/cancel-for-maintenance', authMiddleware, bookingController.cancelBookingForMaintenance); // Cancel booking for maintenance
 router.post('/cancel-multiple-for-maintenance', authMiddleware, bookingController.cancelMultipleBookingsForMaintenance); // Cancel multiple bookings for maintenance
+router.post('/owner-booking', authMiddleware, bookingController.createOwnerBooking); // Create owner booking
 router.post('/', authMiddleware, bookingController.createBooking);
 router.get('/:id', authMiddleware, bookingController.getBookingById); 
 router.post('/:id/payment', authMiddleware, bookingController.processPayment);

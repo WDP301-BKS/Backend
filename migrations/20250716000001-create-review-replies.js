@@ -37,7 +37,11 @@ module.exports = {
     });
 
     // Tạo index cho review_id để tối ưu query
-    await queryInterface.addIndex('review_replies', ['review_id']);
+    try {
+      await queryInterface.addIndex('review_replies', ['review_id']);
+    } catch (error) {
+      console.log('Index review_replies_review_id already exists, skipping...');
+    }
   },
 
   down: async (queryInterface, Sequelize) => {

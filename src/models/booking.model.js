@@ -55,13 +55,35 @@ const Booking = sequelize.define('booking', {
   },
   user_id: {
     type: DataTypes.UUID,
-    allowNull: false // Now required for all bookings
+    allowNull: true // Changed to allow null for owner bookings
   },
   customer_info: {
     type: DataTypes.JSON // Store customer details
   },
   booking_metadata: {
     type: DataTypes.JSON // Store additional booking info
+  },
+  is_owner_booking: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    allowNull: false
+  },
+  created_by_owner: {
+    type: DataTypes.UUID,
+    allowNull: true,
+    references: {
+      model: 'Users',
+      key: 'id'
+    }
+  },
+  remaining_amount: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 0,
+    allowNull: true
+  },
+  notes: {
+    type: DataTypes.TEXT,
+    allowNull: true
   }
 }, {
   timestamps: true,

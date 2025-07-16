@@ -1768,6 +1768,222 @@ const cancelMultipleBookingsForMaintenance = async (req, res) => {
     }
 };
 
+// Create owner booking (for field owners to book on behalf of customers)
+const createOwnerBooking = async (req, res) => {
+    const operationId = performanceMonitor.startOperation('create_owner_booking', {
+        type: 'owner_booking_creation',
+        ownerId: req.user?.id,
+        fieldId: req.body.fieldId
+    });
+
+    try {
+        const ownerId = req.user?.id;
+
+        // Check if user is authenticated and is an owner
+        if (!ownerId) {
+            performanceMonitor.endOperation(operationId, { error: 'UNAUTHORIZED' });
+            return res.status(401).json(responseFormatter.error({
+                code: 'UNAUTHORIZED',
+                message: 'Bạn cần đăng nhập để thực hiện chức năng này'
+            }));
+        }
+
+        const {
+            fieldId,
+            subFieldIds,
+            bookingDate,
+            timeSlots,
+            customerInfo,
+            totalAmount,
+            notes,
+            paymentMethod,
+            isPaidInFull,
+            depositAmount
+        } = req.body;
+
+        // Validate required fields
+        if (!fieldId || !subFieldIds || !bookingDate || !timeSlots || !customerInfo || !totalAmount) {
+            performanceMonitor.endOperation(operationId, { error: 'VALIDATION_ERROR' });
+            return res.status(400).json(responseFormatter.error({
+                code: 'VALIDATION_ERROR',
+                message: 'Thiếu thông tin bắt buộc'
+            }));
+        }
+
+        // Validate customer info
+        if (!customerInfo.name || !customerInfo.phone || !customerInfo.email) {
+            performanceMonitor.endOperation(operationId, { error: 'VALIDATION_ERROR' });
+            return res.status(400).json(responseFormatter.error({
+                code: 'VALIDATION_ERROR',
+                message: 'Thông tin khách hàng không đầy đủ'
+            }));
+        }
+
+        // Verify the field belongs to the owner
+        const field = await Field.findOne({
+            where: { id: fieldId, owner_id: ownerId }
+        });
+
+        if (!field) {
+            performanceMonitor.endOperation(operationId, { error: 'FIELD_NOT_FOUND' });
+            return res.status(404).json(responseFormatter.error({
+                code: 'FIELD_NOT_FOUND',
+                message: 'Không tìm thấy sân hoặc bạn không có quyền truy cập'
+            }));
+        }
+
+        // Check availability
+        const availabilityResult = await retryMechanism.executeDatabaseOperation(
+            () => dbOptimizer.checkAvailabilityOptimized(fieldId, bookingDate, timeSlots),
+            'availability_check'
+        );
+
+        if (!availabilityResult.isAvailable) {
+            performanceMonitor.endOperation(operationId, { error: 'AVAILABILITY_CONFLICT' });
+            const firstConflict = availabilityResult.conflicts[0];
+            return res.status(409).json(responseFormatter.error({
+                code: 'AVAILABILITY_CONFLICT',
+                message: `Khung giờ ${firstConflict.requestedSlot?.start_time || 'không xác định'} đã được đặt`,
+                details: { conflicts: availabilityResult.conflicts }
+            }));
+        }
+
+        // Create booking using transaction
+        const booking = await sequelize.transaction(async (transaction) => {
+            // Create booking record
+            const newBooking = await Booking.create({
+                field_id: fieldId,
+                user_id: null, // No user for owner bookings
+                booking_date: bookingDate,
+                total_price: totalAmount,
+                status: 'confirmed', // Owner bookings are automatically confirmed
+                payment_status: isPaidInFull ? 'paid' : 'partial',
+                payment_method: paymentMethod,
+                deposit_amount: depositAmount,
+                remaining_amount: isPaidInFull ? 0 : (totalAmount - depositAmount),
+                customer_info: JSON.stringify(customerInfo),
+                notes: notes || '',
+                is_owner_booking: true,
+                created_by_owner: ownerId,
+                booking_metadata: JSON.stringify({
+                    playDate: bookingDate,
+                    timeSlots: timeSlots,
+                    fieldName: field.name,
+                    customerInfo: customerInfo,
+                    paymentMethod: paymentMethod,
+                    isPaidInFull: isPaidInFull,
+                    depositAmount: depositAmount
+                })
+            }, { transaction });
+
+            // Create time slots
+            const timeSlotPromises = timeSlots.map(async (slot) => {
+                return await TimeSlot.create({
+                    sub_field_id: slot.sub_field_id,
+                    booking_id: newBooking.id,
+                    start_time: slot.start_time,
+                    end_time: slot.end_time,
+                    date: bookingDate,
+                    status: 'booked',
+                    price: Math.round(totalAmount / timeSlots.length) // Distribute price across slots
+                }, { transaction });
+            });
+
+            await Promise.all(timeSlotPromises);
+
+            return newBooking;
+        });
+
+        // Clear availability cache
+        await Promise.all(subFieldIds.map(async (subFieldId) => {
+            await dbOptimizer.clearAvailabilityCache(subFieldId, bookingDate);
+        }));
+
+        // Get booking with details for response
+        const bookingWithDetails = await retryMechanism.executeDatabaseOperation(
+            () => dbOptimizer.getBookingWithDetails(booking.id),
+            'booking_details_lookup'
+        );
+
+        // Emit real-time event
+        try {
+            emitBookingEvent(fieldId, {
+                type: 'owner_booking_created',
+                bookingId: booking.id,
+                fieldId: fieldId,
+                date: bookingDate,
+                timeSlots: timeSlots,
+                customerInfo: customerInfo,
+                totalAmount: totalAmount,
+                timestamp: new Date().toISOString()
+            });
+        } catch (emitError) {
+            console.error('Error emitting owner booking event:', emitError);
+        }
+
+        // Send email notifications (optional for owner bookings)
+        try {
+            const emailService = require('../utils/emailService');
+            const bookingDetails = {
+                id: booking.id,
+                fieldName: field.name,
+                customerName: customerInfo.name,
+                customerEmail: customerInfo.email,
+                customerPhone: customerInfo.phone,
+                date: new Date(bookingDate).toLocaleDateString('vi-VN'),
+                startTime: timeSlots[0]?.start_time || '',
+                endTime: timeSlots[timeSlots.length - 1]?.end_time || '',
+                totalAmount: totalAmount,
+                paymentMethod: paymentMethod,
+                isPaidInFull: isPaidInFull,
+                depositAmount: depositAmount,
+                notes: notes
+            };
+
+            // Send confirmation email to customer
+            await emailService.sendOwnerBookingConfirmationEmail(
+                customerInfo.email,
+                customerInfo.name,
+                bookingDetails
+            );
+
+            console.log('✅ Owner booking confirmation email sent to:', customerInfo.email);
+        } catch (emailError) {
+            console.error('Error sending owner booking email:', emailError);
+            // Don't fail the booking creation if email fails
+        }
+
+        performanceMonitor.endOperation(operationId, { success: true, bookingId: booking.id });
+        performanceMonitor.monitorBookingOperation('create_owner', fieldId, totalAmount, true);
+
+        return res.status(201).json(responseFormatter.success({
+            booking: bookingWithDetails,
+            message: 'Đặt sân hộ khách hàng thành công'
+        }));
+
+    } catch (error) {
+        console.error('Error in createOwnerBooking:', error);
+        performanceMonitor.endOperation(operationId, { error: error.message });
+        performanceMonitor.monitorBookingOperation('create_owner', req.body.fieldId, req.body.totalAmount, false, error.message);
+        
+        if (error instanceof ValidationError) {
+            return res.status(400).json(responseFormatter.error({
+                code: 'VALIDATION_ERROR',
+                message: 'Dữ liệu không hợp lệ',
+                details: error.errors.reduce((acc, curr) => {
+                    acc[curr.path] = curr.message;
+                    return acc;
+                }, {})
+            }));
+        }
+        
+        return res.status(500).json(responseFormatter.error({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Đã có lỗi xảy ra khi tạo đặt sân'
+        }));
+    }
+};
+
 module.exports = {
     getFieldAvailability,
     createBooking,
@@ -1779,5 +1995,6 @@ module.exports = {
     processPayment,
     getFieldAvailabilityWithPricing,
     cancelBookingForMaintenance,
-    cancelMultipleBookingsForMaintenance
+    cancelMultipleBookingsForMaintenance,
+    createOwnerBooking
 };

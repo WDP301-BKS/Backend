@@ -13,18 +13,30 @@ module.exports = {
       });
     }
 
-    // Thêm index để tối ưu truy vấn
-    await queryInterface.addIndex('users', ['package_expire_date'], {
-      name: 'idx_users_package_expire_date'
-    });
+    // Thêm index để tối ưu truy vấn (với kiểm tra tồn tại)
+    try {
+      await queryInterface.addIndex('users', ['package_expire_date'], {
+        name: 'idx_users_package_expire_date'
+      });
+    } catch (error) {
+      console.log('Index idx_users_package_expire_date already exists, skipping...');
+    }
 
-    await queryInterface.addIndex('users', ['package_type'], {
-      name: 'idx_users_package_type'
-    });
+    try {
+      await queryInterface.addIndex('users', ['package_type'], {
+        name: 'idx_users_package_type'
+      });
+    } catch (error) {
+      console.log('Index idx_users_package_type already exists, skipping...');
+    }
 
-    await queryInterface.addIndex('fields', ['is_verified', 'owner_id'], {
-      name: 'idx_fields_verified_owner'
-    });
+    try {
+      await queryInterface.addIndex('fields', ['is_verified', 'owner_id'], {
+        name: 'idx_fields_verified_owner'
+      });
+    } catch (error) {
+      console.log('Index idx_fields_verified_owner already exists, skipping...');
+    }
   },
 
   down: async (queryInterface, Sequelize) => {

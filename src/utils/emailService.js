@@ -1232,6 +1232,172 @@ Trân trọng,
   }
 };
 
+/**
+ * Gửi email xác nhận đặt sân hộ khách hàng
+ * @param {string} to - Email khách hàng
+ * @param {string} customerName - Tên khách hàng
+ * @param {object} bookingDetails - Thông tin đặt sân
+ * @returns {Promise} - Promise chứa kết quả gửi email
+ */
+const sendOwnerBookingConfirmationEmail = async (to, customerName, bookingDetails) => {
+  try {
+    const subject = `✅ Xác nhận đặt sân - Mã: ${bookingDetails.id}`;
+    
+    const text = `
+Xin chào ${customerName},
+
+Đặt sân của bạn đã được xác nhận!
+
+Thông tin đặt sân:
+- Mã đặt sân: ${bookingDetails.id}
+- Sân: ${bookingDetails.fieldName}
+- Ngày: ${bookingDetails.date}
+- Giờ: ${bookingDetails.startTime} - ${bookingDetails.endTime}
+- Tổng tiền: ${bookingDetails.totalAmount?.toLocaleString('vi-VN')} VND
+- Hình thức thanh toán: ${bookingDetails.paymentMethod}
+- Trạng thái: ${bookingDetails.isPaidInFull ? 'Đã thanh toán đầy đủ' : `Đã đặt cọc ${bookingDetails.depositAmount?.toLocaleString('vi-VN')} VND`}
+
+${bookingDetails.notes ? `Ghi chú: ${bookingDetails.notes}` : ''}
+
+Cảm ơn bạn đã sử dụng dịch vụ của chúng tôi!
+
+Trân trọng,
+Đội ngũ hỗ trợ khách hàng
+    `;
+
+    const html = `
+    <!DOCTYPE html>
+    <html lang="vi">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Xác nhận đặt sân</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <!-- Header -->
+            <div style="background-color: rgba(255,255,255,0.1); padding: 30px 20px; text-align: center; border-bottom: 2px solid rgba(255,255,255,0.2);">
+                <h1 style="color: white; margin: 0; font-size: 28px; font-weight: bold;">
+                    ✅ Xác nhận đặt sân
+                </h1>
+                <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 16px;">
+                    Đặt sân thành công qua chủ sân
+                </p>
+            </div>
+            
+            <!-- Content -->
+            <div style="background-color: white; padding: 30px 20px;">
+                <div style="background-color: #f8f9ff; padding: 20px; border-radius: 8px; border-left: 4px solid #4f46e5; margin-bottom: 25px;">
+                    <h2 style="color: #1f2937; margin: 0 0 15px 0; font-size: 20px;">
+                        👋 Xin chào ${customerName}!
+                    </h2>
+                    <p style="color: #4b5563; margin: 0; font-size: 16px;">
+                        Đặt sân của bạn đã được xác nhận bởi chủ sân. Dưới đây là thông tin chi tiết:
+                    </p>
+                </div>
+
+                <!-- Booking Details -->
+                <div style="background-color: #f9fafb; padding: 25px; border-radius: 12px; margin-bottom: 25px;">
+                    <h3 style="color: #1f2937; margin: 0 0 20px 0; font-size: 18px; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px;">
+                        📋 Thông tin đặt sân
+                    </h3>
+                    
+                    <div style="display: grid; gap: 15px;">
+                        <div style="display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+                            <span style="color: #6b7280; font-weight: 500; width: 140px;">Mã đặt sân:</span>
+                            <span style="color: #1f2937; font-weight: bold; background-color: #dbeafe; padding: 4px 8px; border-radius: 4px;">
+                                ${bookingDetails.id}
+                            </span>
+                        </div>
+                        
+                        <div style="display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+                            <span style="color: #6b7280; font-weight: 500; width: 140px;">Sân:</span>
+                            <span style="color: #1f2937; font-weight: 600;">${bookingDetails.fieldName}</span>
+                        </div>
+                        
+                        <div style="display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+                            <span style="color: #6b7280; font-weight: 500; width: 140px;">Ngày:</span>
+                            <span style="color: #1f2937; font-weight: 600;">${bookingDetails.date}</span>
+                        </div>
+                        
+                        <div style="display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+                            <span style="color: #6b7280; font-weight: 500; width: 140px;">Giờ:</span>
+                            <span style="color: #1f2937; font-weight: 600;">${bookingDetails.startTime} - ${bookingDetails.endTime}</span>
+                        </div>
+                        
+                        <div style="display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+                            <span style="color: #6b7280; font-weight: 500; width: 140px;">Tổng tiền:</span>
+                            <span style="color: #059669; font-weight: bold; font-size: 18px;">
+                                ${bookingDetails.totalAmount?.toLocaleString('vi-VN')} VND
+                            </span>
+                        </div>
+                        
+                        <div style="display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+                            <span style="color: #6b7280; font-weight: 500; width: 140px;">Thanh toán:</span>
+                            <span style="color: #1f2937; font-weight: 600;">${bookingDetails.paymentMethod}</span>
+                        </div>
+                        
+                        <div style="display: flex; align-items: center; padding: 10px 0;">
+                            <span style="color: #6b7280; font-weight: 500; width: 140px;">Trạng thái:</span>
+                            <span style="color: ${bookingDetails.isPaidInFull ? '#059669' : '#d97706'}; font-weight: bold; background-color: ${bookingDetails.isPaidInFull ? '#dcfce7' : '#fef3c7'}; padding: 4px 8px; border-radius: 4px;">
+                                ${bookingDetails.isPaidInFull ? 'Đã thanh toán đầy đủ' : `Đã đặt cọc ${bookingDetails.depositAmount?.toLocaleString('vi-VN')} VND`}
+                            </span>
+                        </div>
+                        
+                        ${bookingDetails.notes ? `
+                        <div style="display: flex; align-items: flex-start; padding: 10px 0; border-top: 1px solid #e5e7eb;">
+                            <span style="color: #6b7280; font-weight: 500; width: 140px;">Ghi chú:</span>
+                            <span style="color: #1f2937; font-style: italic;">${bookingDetails.notes}</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+
+                <!-- Important Note -->
+                <div style="background-color: #f0f9ff; padding: 20px; border-radius: 8px; border-left: 4px solid #0ea5e9; margin-bottom: 25px;">
+                    <h4 style="color: #0c4a6e; margin: 0 0 10px 0; font-size: 16px;">
+                        📌 Lưu ý quan trọng:
+                    </h4>
+                    <ul style="color: #0c4a6e; margin: 0; padding-left: 20px;">
+                        <li>Vui lòng đến sân đúng giờ để nhận sân</li>
+                        <li>Mang theo mã đặt sân khi đến sân</li>
+                        <li>Liên hệ chủ sân nếu có thay đổi</li>
+                        ${!bookingDetails.isPaidInFull ? '<li style="color: #d97706; font-weight: bold;">Hoàn tất thanh toán phần còn lại khi đến sân</li>' : ''}
+                    </ul>
+                </div>
+
+                <!-- Contact Info -->
+                <div style="text-align: center; padding: 20px; background-color: #f1f5f9; border-radius: 12px;">
+                    <h4 style="color: #1f2937; margin: 0 0 15px 0;">📞 Hỗ trợ khách hàng</h4>
+                    <p style="color: #6b7280; margin: 0;">
+                        Nếu bạn có bất kỳ câu hỏi nào, vui lòng liên hệ với chúng tôi
+                    </p>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="background-color: #1f2937; padding: 30px 20px; text-align: center;">
+                <h3 style="color: #667eea; margin: 0 0 10px 0; font-size: 20px;">⚽ Football Field Booking</h3>
+                <p style="color: #9ca3af; margin: 0 0 15px 0;">Cảm ơn bạn đã sử dụng dịch vụ của chúng tôi!</p>
+                <div style="border-top: 1px solid #374151; padding-top: 20px; margin-top: 20px;">
+                    <p style="color: #6b7280; margin: 0; font-size: 14px;">
+                        © 2025 Football Field Booking. Mọi quyền được bảo lưu.<br>
+                        Đây là email thông báo tự động, vui lòng không trả lời.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+
+    return await sendEmail(to, subject, text, html);
+  } catch (error) {
+    console.error('Error sending owner booking confirmation email:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   sendEmail,
   sendRegistrationEmail,
@@ -1242,5 +1408,6 @@ module.exports = {
   sendFieldApprovalEmail,
   sendFieldRejectionEmail,
   sendPackagePurchaseSuccessEmail,
-  sendPackagePurchaseFailedEmail
+  sendPackagePurchaseFailedEmail,
+  sendOwnerBookingConfirmationEmail
 };
