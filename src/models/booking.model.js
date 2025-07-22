@@ -72,7 +72,7 @@ const Booking = sequelize.define('booking', {
     type: DataTypes.UUID,
     allowNull: true,
     references: {
-      model: 'Users',
+      model: 'users',
       key: 'id'
     }
   },
