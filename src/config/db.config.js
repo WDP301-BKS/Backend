@@ -11,14 +11,19 @@ const dbPassword = process.env.DB_PASSWORD || 'password';
 const dbHost = process.env.DB_HOST || 'localhost';
 const dbPort = process.env.DB_PORT || 5432;
 
+// SSL configuration for production
+const isProduction = process.env.NODE_ENV === 'production';
+const sslConfig = isProduction ? {
+  ssl: {
+    require: true,
+    rejectUnauthorized: false
+  }
+} : {};
+
 // Initialize main Sequelize connection
 const sequelize = new Sequelize(
-  dbName,
-  dbUser,
-  dbPassword,
+  process.env.DATABASE_URL || `postgres://${dbUser}:${dbPassword}@${dbHost}:${dbPort}/${dbName}`,
   {
-    host: dbHost,
-    port: dbPort,
     dialect: 'postgres',
     pool: {
       max: 5,
@@ -26,7 +31,15 @@ const sequelize = new Sequelize(
       acquire: 30000,
       idle: 10000
     },
-    logging: false
+    logging: false,
+    ...(isProduction && {
+      dialectOptions: {
+        ssl: {
+          require: true,
+          rejectUnauthorized: false
+        }
+      }
+    })
   }
 );
 
@@ -38,7 +51,8 @@ const createDatabaseIfNotExists = async () => {
     host: dbHost,
     password: dbPassword,
     port: dbPort,
-    database: 'postgres' // Connect to default postgres database
+    database: 'postgres', // Connect to default postgres database
+    ...sslConfig
   });
 
   try {
