@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: football-field-booking-backend
+    env: node
+    buildCommand: ./build.sh
+    startCommand: npm start
+    plan: free  # or starter/standard for production
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000  # Render uses port 10000 by default
+    autoDeploy: true
+    # Render will automatically provide a free domain like: football-field-booking-backend.onrender.com
+    
+databases:
+  - name: football-field-booking-db
+    databaseName: football_field_booking
+    user: postgres1
+    plan: free  # or starter/standard for production

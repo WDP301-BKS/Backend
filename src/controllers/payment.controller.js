@@ -123,8 +123,21 @@ class PaymentController {
   // Sanitize và validate đầu vào
   validateBookingData(data) {
     const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+    
     try {
-      fs.writeFileSync('/tmp/validation_debug.json', JSON.stringify({
+      // Use os.tmpdir() for cross-platform compatibility
+      const tmpDir = process.env.NODE_ENV === 'production' ? 
+        path.join(__dirname, '../../logs') : 
+        path.join(os.tmpdir(), 'football-booking');
+      
+      // Ensure directory exists
+      if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+      }
+      
+      fs.writeFileSync(path.join(tmpDir, 'validation_debug.json'), JSON.stringify({
         timestamp: new Date().toISOString(),
         receivedData: data
       }, null, 2));
@@ -188,7 +201,12 @@ class PaymentController {
       if (data.return_url) {
         const isValidReturnUrl = validator.isURL(data.return_url, { require_protocol: true, allow_localhost: true }) ||
                                   (data.return_url.startsWith('http://localhost:') || data.return_url.startsWith('https://localhost:'));
-        fs.writeFileSync('/tmp/url_debug.json', JSON.stringify({
+        
+        const tmpDir = process.env.NODE_ENV === 'production' ? 
+          path.join(__dirname, '../../logs') : 
+          path.join(os.tmpdir(), 'football-booking');
+        
+        fs.writeFileSync(path.join(tmpDir, 'url_debug.json'), JSON.stringify({
           return_url: data.return_url,
           isValidReturnUrl: isValidReturnUrl,
           cancel_url: data.cancel_url,
@@ -213,7 +231,11 @@ class PaymentController {
 
     return errors;
     } catch (mainError) {
-      fs.writeFileSync('/tmp/validation_main_error.json', JSON.stringify({
+      const tmpDir = process.env.NODE_ENV === 'production' ? 
+        path.join(__dirname, '../../logs') : 
+        path.join(os.tmpdir(), 'football-booking');
+      
+      fs.writeFileSync(path.join(tmpDir, 'validation_main_error.json'), JSON.stringify({
         error: mainError.message,
         stack: mainError.stack
       }, null, 2));

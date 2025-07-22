@@ -8,6 +8,8 @@
     "dev": "nodemon src/index.js",
     "test": "jest",
     "test:race": "jest test/race-condition-test.js",
+    "migrate": "npx sequelize-cli db:migrate",
+    "migrate:undo": "npx sequelize-cli db:migrate:undo",
     "stripe:webhook": "docker run --rm -it stripe/stripe-cli listen --forward-to host.docker.internal:5001/api/payments/webhook",
     "stripe:login": "docker run --rm -it stripe/stripe-cli login"
   },
