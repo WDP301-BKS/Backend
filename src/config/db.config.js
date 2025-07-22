@@ -81,10 +81,13 @@ const createDatabaseIfNotExists = async () => {
 // Test and initialize database connection
 const testDbConnection = async () => {
   try {
-    // First try to create database if it doesn't exist
-    await createDatabaseIfNotExists();
+    // In production, skip database creation (Render manages this)
+    if (!isProduction) {
+      // Only try to create database in development
+      await createDatabaseIfNotExists();
+    }
     
-    // Then authenticate connection to our database
+    // Test connection to our database
     await sequelize.authenticate();
     console.log('Database connection has been established successfully.');
   } catch (error) {
