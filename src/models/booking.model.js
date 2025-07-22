@@ -84,6 +84,13 @@ const Booking = sequelize.define('booking', {
   notes: {
     type: DataTypes.TEXT,
     allowNull: true
+  },
+  // Thêm trường để phân biệt booking thường và package payment
+  isPackage: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    allowNull: false,
+    comment: 'True nếu đây là giao dịch mua package, false nếu là booking sân thường'
   }
 }, {
   timestamps: true,

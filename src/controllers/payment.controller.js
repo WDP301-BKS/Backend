@@ -797,18 +797,111 @@ class PaymentController {
           if (packageType === 'premium') {
             // Premium: 180 days (6 months)
             newExpireDate.setDate(newExpireDate.getDate() + 180);
+            var packageDuration = '6 tháng';
+            var packagePrice = 180; // Giá package premium (có thể lấy từ session.amount_total)
           } else {
             // Basic: 30 days
             newExpireDate.setDate(newExpireDate.getDate() + 30);
+            var packageDuration = '1 tháng';
+            var packagePrice = 30; // Giá package basic (có thể lấy từ session.amount_total)
           }
           
-          // Cập nhật thông tin package cho user
+          // ===== THÊM LOGIC MỚI: Lưu package payment vào booking table =====
+          // Tạo một booking record đặc biệt cho package payment để có thể tính tổng tiền
+          try {
+            const packageBooking = await Booking.create({
+              // Thông tin cơ bản cho package booking
+              booking_date: new Date(), // Ngày mua package
+              status: 'confirmed', // Package payment luôn confirmed sau khi thanh toán thành công
+              total_price: session.amount_total || packagePrice, // Giá package từ Stripe session
+              payment_status: 'paid', // Đã thanh toán thành công
+              payment_method: 'stripe', // Phương thức thanh toán
+              user_id: userId, // User mua package
+              
+              // Thông tin khách hàng cho package
+              customer_info: {
+                name: user.name || session.customer_details?.name || 'Package Customer',
+                email: user.email || session.customer_details?.email || '',
+                notes: `Mua gói dịch vụ ${packageType}`
+              },
+              
+              // Metadata đặc biệt cho package
+              booking_metadata: {
+                packageType: packageType,
+                packageName: session.metadata?.package_name || (packageType === 'premium' ? 'Gói Premium' : 'Gói Cơ Bản'),
+                packageDuration: packageDuration,
+                packagePrice: session.amount_total || packagePrice,
+                purchaseDate: new Date().toISOString(),
+                expireDate: newExpireDate.toISOString(),
+                stripeSessionId: session.id,
+                stripePaymentIntentId: session.payment_intent,
+                features: packageType === 'premium' 
+                  ? 'Đăng được 5 sân, Analytics, Priority support'
+                  : 'Đăng sân cơ bản, Quản lý booking'
+              },
+              
+              // Các trường không liên quan để null/empty cho package
+              deposit_amount: 0,
+              refund_amount: 0,
+              remaining_amount: 0,
+              is_owner_booking: false,
+              created_by_owner: null,
+              cancellation_reason: null,
+              refund_method: null,
+              cancelled_at: null,
+              payment_due_date: null,
+              notes: `Package purchase: ${packageType} - ${packageDuration}`,
+              
+              // QUAN TRỌNG: Đánh dấu đây là package payment
+              isPackage: true // TRUE để phân biệt với booking sân thường
+            }, { transaction });
+            
+            logger.info('Package booking record created successfully:', {
+              packageBookingId: packageBooking.id,
+              userId: userId,
+              packageType: packageType,
+              amount: session.amount_total || packagePrice,
+              isPackage: true
+            });
+            
+            // Tạo payment record cho package booking (để tracking đầy đủ)
+            const Payment = require('../models/payment.model');
+            await Payment.create({
+              booking_id: packageBooking.id,
+              user_id: userId,
+              amount: session.amount_total || packagePrice,
+              currency: session.currency || 'vnd',
+              status: 'succeeded',
+              stripe_payment_intent_id: session.payment_intent,
+              stripe_session_id: session.id,
+              stripe_status: 'paid',
+              customer_email: user.email || session.customer_details?.email,
+              customer_name: user.name || session.customer_details?.name,
+              processed_at: new Date(),
+              metadata: {
+                type: 'package',
+                packageType: packageType,
+                packageDuration: packageDuration
+              }
+            }, { transaction });
+            
+            logger.info('Package payment record created successfully for booking:', packageBooking.id);
+            
+          } catch (packageBookingError) {
+            logger.error('Error creating package booking record:', packageBookingError);
+            // Không fail toàn bộ transaction vì logic cũ vẫn hoạt động
+            // Chỉ log error để debug
+          }
+          // ===== KẾT THÚC LOGIC MỚI =====
+          
+          // Cập nhật thông tin package cho user (giữ nguyên logic cũ)
           await user.update({
             package_type: packageType,
             package_purchase_date: new Date(),
             package_expire_date: newExpireDate
           }, { transaction });
           logger.info('User package updated successfully:', userId);
+          
           await transaction.commit();
           
           // Gửi email thông báo mua gói thành công
@@ -3014,6 +3107,140 @@ class PaymentController {
     
     return transformedData;
   }
+
+  // ===== HELPER FUNCTIONS CHO PACKAGE BOOKINGS =====
+  
+  /**
+   * Lấy tất cả package bookings của một user (để tính tổng tiền đã chi cho packages)
+   * @param {string} userId - ID của user
+   * @param {Object} options - Tùy chọn query (dateRange, packageType, etc.)
+   * @returns {Array} Danh sách package bookings
+   */
+  async getPackageBookingsByUser(userId, options = {}) {
+    try {
+      const whereConditions = {
+        user_id: userId,
+        isPackage: true, // Chỉ lấy package bookings
+        payment_status: 'paid' // Chỉ lấy các package đã thanh toán
+      };
+      
+      // Thêm filter theo loại package nếu có
+      if (options.packageType) {
+        whereConditions['booking_metadata.packageType'] = options.packageType;
+      }
+      
+      // Thêm filter theo khoảng thời gian nếu có
+      if (options.startDate || options.endDate) {
+        whereConditions.booking_date = {};
+        if (options.startDate) {
+          whereConditions.booking_date[Op.gte] = new Date(options.startDate);
+        }
+        if (options.endDate) {
+          whereConditions.booking_date[Op.lte] = new Date(options.endDate);
+        }
+      }
+      
+      const packageBookings = await Booking.findAll({
+        where: whereConditions,
+        order: [['booking_date', 'DESC']],
+        attributes: [
+          'id', 'booking_date', 'total_price', 'payment_status', 
+          'booking_metadata', 'created_at', 'isPackage'
+        ]
+      });
+      
+      logger.info(`Found ${packageBookings.length} package bookings for user ${userId}`);
+      return packageBookings;
+      
+    } catch (error) {
+      logger.error('Error getting package bookings by user:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Tính tổng tiền user đã chi cho packages
+   * @param {string} userId - ID của user
+   * @param {Object} options - Tùy chọn (dateRange, packageType)
+   * @returns {Object} Thông tin tổng tiền và số lượng packages
+   */
+  async calculatePackageSpending(userId, options = {}) {
+    try {
+      const packageBookings = await this.getPackageBookingsByUser(userId, options);
+      
+      const totalSpent = packageBookings.reduce((sum, booking) => {
+        return sum + parseFloat(booking.total_price || 0);
+      }, 0);
+      
+      const packageStats = {
+        totalSpent: totalSpent,
+        totalPackages: packageBookings.length,
+        basicPackages: packageBookings.filter(b => 
+          b.booking_metadata?.packageType === 'basic'
+        ).length,
+        premiumPackages: packageBookings.filter(b => 
+          b.booking_metadata?.packageType === 'premium'
+        ).length,
+        packageHistory: packageBookings.map(booking => ({
+          id: booking.id,
+          purchaseDate: booking.booking_date,
+          packageType: booking.booking_metadata?.packageType,
+          packageName: booking.booking_metadata?.packageName,
+          amount: booking.total_price,
+          duration: booking.booking_metadata?.packageDuration
+        }))
+      };
+      
+      logger.info(`Package spending calculated for user ${userId}:`, {
+        totalSpent: totalSpent,
+        totalPackages: packageBookings.length
+      });
+      
+      return packageStats;
+      
+    } catch (error) {
+      logger.error('Error calculating package spending:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * API endpoint để lấy thống kê package của user
+   */
+  async getPackageStats(req, res) {
+    try {
+      const userId = req.user?.id;
+      const { startDate, endDate, packageType } = req.query;
+      
+      if (!userId) {
+        return res.status(401).json(responseFormatter.error({
+          code: 'UNAUTHORIZED',
+          message: 'Bạn cần đăng nhập để xem thống kê'
+        }));
+      }
+      
+      const options = {};
+      if (startDate) options.startDate = startDate;
+      if (endDate) options.endDate = endDate;
+      if (packageType) options.packageType = packageType;
+      
+      const packageStats = await this.calculatePackageSpending(userId, options);
+      
+      return res.status(200).json(responseFormatter.success({
+        message: 'Thống kê package được tải thành công',
+        data: packageStats
+      }));
+      
+    } catch (error) {
+      logger.error('Error getting package stats:', error);
+      return res.status(500).json(responseFormatter.error({
+        code: 500,
+        message: 'Lỗi khi lấy thống kê package'
+      }));
+    }
+  }
+
+  // ===== KẾT THÚC HELPER FUNCTIONS =====
 }
 
 module.exports = new PaymentController();

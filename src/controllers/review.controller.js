@@ -138,7 +138,7 @@ const createReview = async (req, res) => {
     if (!hasCompleted) {
       return res.status(403).json({
         success: false,
-        message: 'Chỉ được review khi đã hoàn thành sử dụng dịch vụ tại sân này.',
+        message: 'Chỉ được đánh giá khi đã sử dụng dịch vụ tại sân này.',
       });
     }
 
@@ -152,7 +152,7 @@ const createReview = async (req, res) => {
     if (existingReview) {
       return res.status(400).json({
         success: false,
-        message: 'Bạn chỉ được review 1 lần cho mỗi sân đã hoàn thành.',
+        message: 'Bạn chỉ được đánh giá 1 lần cho mỗi sân đã sử dụng.',
       });
     }
 

@@ -2,7 +2,13 @@ const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/admin.controller');
 const adminFieldController = require('../controllers/admin.field.controller');
+const adminDashboardController = require('../controllers/admin.dashboard.controller');
 const { authMiddleware, isAdmin } = require('../middlewares/auth.middleware');
+
+// Dashboard routes không cần xác thực khi test
+router.get('/dashboard/statistics', adminDashboardController.getDashboardStatistics);
+router.get('/dashboard/monthly-revenue', adminDashboardController.getMonthlyRevenueData);
+router.get('/dashboard/top-field-owners', adminDashboardController.getTopFieldOwners);
 
 // Tất cả routes admin đều cần authentication và role admin
 router.use(authMiddleware, isAdmin);

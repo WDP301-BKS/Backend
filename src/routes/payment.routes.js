@@ -54,4 +54,8 @@ router.post('/create-package-payment', authMiddleware, PaymentController.createP
 // Get package status for current user
 router.get('/package-status', authMiddleware, PaymentController.getPackageStatus.bind(PaymentController));
 
+// ===== ROUTES MỚI CHO PACKAGE STATS =====
+// Lấy thống kê package của user hiện tại
+router.get('/package/stats', authMiddleware, PaymentController.getPackageStats.bind(PaymentController));
+
 module.exports = router;
