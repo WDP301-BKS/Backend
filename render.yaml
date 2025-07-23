@@ -13,7 +13,7 @@ services:
       - key: BACKEND_URL
         value: https://football-field-booking-backend.onrender.com
       - key: FRONTEND_URL
-        value: https://frontend-two-puce-96.vercel.app/
+        value: https://frontend-omega-ochre.vercel.app
       - key: DATABASE_URL
         value: postgresql://postgres.xssmpncqecddvemhwcto:WtSIghp4hTymPBXf@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres
       - key: USE_POSTGRES
