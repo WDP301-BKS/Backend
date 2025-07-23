@@ -5,30 +5,51 @@ const { Pool } = require('pg');
 dotenv.config();
 
 // Database configuration
-const dbName = process.env.DB_NAME ;
+const dbName = process.env.DB_NAME;
 const dbUser = process.env.DB_USER || 'postgres';
 const dbPassword = process.env.DB_PASSWORD || 'password';
 const dbHost = process.env.DB_HOST || 'localhost';
 const dbPort = process.env.DB_PORT || 5432;
 
-// Initialize main Sequelize connection
-const sequelize = new Sequelize(
-  dbName,
-  dbUser,
-  dbPassword,
-  {
-    host: dbHost,
-    port: dbPort,
+// For production, use DATABASE_URL if provided (Render/Heroku style)
+let sequelizeConfig;
+if (process.env.DATABASE_URL) {
+  sequelizeConfig = {
+    url: process.env.DATABASE_URL,
     dialect: 'postgres',
+    dialectOptions: {
+      ssl: process.env.NODE_ENV === 'production' ? {
+        require: true,
+        rejectUnauthorized: false
+      } : false
+    },
     pool: {
-      max: 5,
+      max: 10,
       min: 0,
       acquire: 30000,
       idle: 10000
     },
-    logging: false
-  }
-);
+    logging: process.env.NODE_ENV === 'development' ? console.log : false
+  };
+} else {
+  sequelizeConfig = {
+    host: dbHost,
+    port: dbPort,
+    dialect: 'postgres',
+    pool: {
+      max: 10,
+      min: 0,
+      acquire: 30000,
+      idle: 10000
+    },
+    logging: process.env.NODE_ENV === 'development' ? console.log : false
+  };
+}
+
+// Initialize main Sequelize connection
+const sequelize = process.env.DATABASE_URL
+  ? new Sequelize(process.env.DATABASE_URL, sequelizeConfig)
+  : new Sequelize(dbName, dbUser, dbPassword, sequelizeConfig);
 
 // Function to create database if it doesn't exist
 const createDatabaseIfNotExists = async () => {
@@ -67,10 +88,15 @@ const createDatabaseIfNotExists = async () => {
 // Test and initialize database connection
 const testDbConnection = async () => {
   try {
-    // First try to create database if it doesn't exist
-    await createDatabaseIfNotExists();
+    // For production with external database (like Supabase), skip database creation
+    if (process.env.NODE_ENV === 'production' || process.env.DATABASE_URL) {
+      console.log('Using external database, skipping database creation check...');
+    } else {
+      // Only try to create database in development
+      await createDatabaseIfNotExists();
+    }
     
-    // Then authenticate connection to our database
+    // Authenticate connection to database
     await sequelize.authenticate();
     console.log('Database connection has been established successfully.');
   } catch (error) {

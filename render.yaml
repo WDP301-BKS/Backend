@@ -1,0 +1,72 @@
+services:
+  - type: web
+    name: football-field-booking-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: BACKEND_URL
+        value: https://football-field-booking-backend.onrender.com
+      - key: FRONTEND_URL
+        value: https://frontend-two-puce-96.vercel.app/
+      - key: DATABASE_URL
+        value: postgresql://postgres.xssmpncqecddvemhwcto:WtSIghp4hTymPBXf@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres
+      - key: USE_POSTGRES
+        value: true
+      - key: DB_FORCE_SYNC
+        value: false
+      - key: DB_HOST
+        value: aws-0-ap-southeast-1.pooler.supabase.com
+      - key: DB_NAME
+        value: postgres
+      - key: DB_PASSWORD
+        value: WtSIghp4hTymPBXf
+      - key: DB_PORT
+        value: 6543
+      - key: DB_USER
+        value: postgres.xssmpncqecddvemhwcto
+      - key: JWT_SECRET
+        value: your-super-secret-jwt-key-minimum-32-characters-long-for-security
+      - key: JWT_EXPIRES_IN
+        value: 1d
+      - key: JWT_REFRESH_SECRET
+        value: football-booking-refresh-token-secret-2025-production-secure
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 30d
+      - key: CLOUDINARY_CLOUD_NAME
+        value: dzrprzgrt
+      - key: CLOUDINARY_API_KEY
+        value: 762343726355191
+      - key: CLOUDINARY_API_SECRET
+        value: yavMIPHjmlWgDmbZ4UxLT5UHErU
+      - key: EMAIL_SERVICE
+        value: gmail
+      - key: EMAIL_USER
+        value: hoanghieulinh123@gmail.com
+      - key: EMAIL_PASS
+        value: "fiyf amrc uwxb iqgd"
+      - key: EMAIL_FROM
+        value: no-reply@football-booking.com
+      - key: GOOGLE_CLIENT_ID
+        value: 475864679817-tskekhfe1qsno1dttgt4kqihhqh4ks5m.apps.googleusercontent.com
+      - key: GOOGLE_CLIENT_SECRET
+        value: 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
+      - key: GOOGLE_CALLBACK_URL
+        value: https://football-field-booking-backend.onrender.com/api/auth/google/callback
+      - key: STRIPE_SECRET_KEY
+        value: sk_test_51Ris6SPNO4BGhrkvEcB4EpiQhTaJgRw8W0xB13BVC4JuSw3r6YNy6mHVmRUBJPVwrTfLasik8hl2XxbD5Y0pEKGI005hum40MB
+      - key: STRIPE_PUBLISHABLE_KEY
+        value: pk_test_51Ris6SPNO4BGhrkv6ipDGU3YXu3hKe6X8GwMTuigbg6ipZRxOOnf0Gg1cLwVxVtabILjMTyLlTmg9odAMSLKYPMg00Btp2mInA
+      - key: STRIPE_WEBHOOK_SECRET
+        value: whsec_AYqIHOw5qRorU8pQW2ENIeaO6FLvpzpd
+      - key: GEMINI_API_KEY
+        value: AIzaSyDbIEHidEgI9TKO-gEftkMMAHYd2f4Qlss
+      - key: MAX_FILE_SIZE
+        value: 5242880
+      - key: UPLOAD_DIR
+        value: uploads

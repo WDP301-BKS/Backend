@@ -34,19 +34,34 @@ const io = initializeSocket(server);
 setSocketInstance(io);
 
 // CORS Configuration
-app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL || 'http://localhost:5173',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173'
-  ],
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      process.env.FRONTEND_URL,
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'https://frontend-two-puce-96.vercel.app'
+    ].filter(Boolean); // Remove any undefined values
+    
+    if (allowedOrigins.some(allowedOrigin => origin.startsWith(allowedOrigin.replace(/\/+$/, '')))) {
+      return callback(null, true);
+    }
+    
+    const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+    return callback(new Error(msg), false);
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-correlation-id', 'Cache-Control', 'Pragma'],
   exposedHeaders: ['x-correlation-id'],
   credentials: true,
   preflightContinue: false,
   optionsSuccessStatus: 204
-}));
+};
+
+app.use(cors(corsOptions));
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
@@ -67,7 +82,23 @@ app.use('/api', routes);
 
 // Default route
 app.get('/', (req, res) => {
-  res.json(responseFormatter.success({ message: 'Welcome to Football Field Booking API.' }));
+  res.json(responseFormatter.success({ 
+    message: 'Welcome to Football Field Booking API.',
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0'
+  }));
+});
+
+// Health check endpoint for Render
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    env: process.env.NODE_ENV || 'development'
+  });
 });
 
 // Handle 404
@@ -131,16 +162,41 @@ const startServer = async () => {
     logger.info('Cron jobs initialized successfully');
     
     // Handle graceful shutdown
-    process.on('SIGTERM', () => {
-      logger.info('SIGTERM received, shutting down gracefully');
-      // PaymentTimeoutService will be cleaned up automatically when process exits
-      process.exit(0);
+    const gracefulShutdown = (signal) => {
+      logger.info(`${signal} received, shutting down gracefully`);
+      
+      server.close(() => {
+        logger.info('HTTP server closed');
+        
+        // Close database connection
+        sequelize.close().then(() => {
+          logger.info('Database connection closed');
+          process.exit(0);
+        }).catch((err) => {
+          logger.error('Error closing database connection:', err);
+          process.exit(1);
+        });
+      });
+      
+      // Force close after 30 seconds
+      setTimeout(() => {
+        logger.error('Could not close connections in time, forcefully shutting down');
+        process.exit(1);
+      }, 30000);
+    };
+    
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    
+    // Handle uncaught exceptions
+    process.on('uncaughtException', (err) => {
+      logger.error('Uncaught Exception:', err);
+      gracefulShutdown('UNCAUGHT_EXCEPTION');
     });
     
-    process.on('SIGINT', () => {
-      logger.info('SIGINT received, shutting down gracefully');
-      // PaymentTimeoutService will be cleaned up automatically when process exits
-      process.exit(0);
+    process.on('unhandledRejection', (reason, promise) => {
+      logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+      gracefulShutdown('UNHANDLED_REJECTION');
     });
     
     // Start the server
