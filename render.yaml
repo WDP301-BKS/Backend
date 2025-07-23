@@ -10,11 +10,17 @@ services:
         value: production
       - key: PORT
         value: 10000  # Render uses port 10000 by default
+      - key: DATABASE_URL
+        value: postgresql://postgres.xssmpncqecddvemhwcto:WtSIghp4hTymPBXf@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres
+      - key: DB_HOST
+        value: aws-0-ap-southeast-1.pooler.supabase.com
+      - key: DB_PORT
+        value: 6543
+      - key: DB_NAME
+        value: postgres
+      - key: DB_USER
+        value: postgres.xssmpncqecddvemhwcto
+      - key: DB_PASSWORD
+        value: WtSIghp4hTymPBXf
     autoDeploy: true
-    # Render will automatically provide a free domain like: football-field-booking-backend.onrender.com
-    
-databases:
-  - name: football-field-booking-db
-    databaseName: football_field_booking
-    user: postgres1
-    plan: free  # or starter/standard for production
+    # Using Supabase instead of Render database

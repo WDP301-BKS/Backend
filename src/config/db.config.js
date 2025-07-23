@@ -11,6 +11,15 @@ const dbPassword = process.env.DB_PASSWORD;
 const dbHost = process.env.DB_HOST;
 const dbPort = process.env.DB_PORT || 5432;
 
+// Fallback connection string if DATABASE_URL is not set
+const fallbackConnectionString = `postgres://${dbUser}:${dbPassword}@${dbHost}:${dbPort}/${dbName}`;
+
+console.log('Database configuration check:');
+console.log('- DATABASE_URL exists:', !!process.env.DATABASE_URL);
+console.log('- DB_HOST:', dbHost || 'Not set');
+console.log('- DB_USER:', dbUser || 'Not set');
+console.log('- DB_PASSWORD:', dbPassword ? 'Set' : 'Not set');
+
 // Always use SSL for Supabase connections
 const sslConfig = {
   ssl: {
@@ -20,9 +29,15 @@ const sslConfig = {
 };
 
 // Initialize main Sequelize connection with Supabase
-const sequelize = new Sequelize(
-  process.env.DATABASE_URL,
-  {
+const databaseUrl = process.env.DATABASE_URL || fallbackConnectionString;
+
+if (!process.env.DATABASE_URL && (!dbHost || !dbPassword)) {
+  console.error('❌ Missing required database configuration!');
+  console.error('Either set DATABASE_URL or provide DB_HOST, DB_USER, DB_PASSWORD');
+  process.exit(1);
+}
+
+const sequelize = new Sequelize(databaseUrl, {
     dialect: 'postgres',
     pool: {
       max: 5,
