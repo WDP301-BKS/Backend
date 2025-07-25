@@ -1187,6 +1187,31 @@ const cancelBookingForMaintenance = async (req, res) => {
             }));
         }
 
+        // Get customer info (different logic for owner bookings vs regular bookings)
+        let customerEmail, customerName;
+        if (booking.is_owner_booking && booking.customer_info) {
+            // For owner bookings, get customer info from customer_info field
+            try {
+                const customerInfo = typeof booking.customer_info === 'string' 
+                    ? JSON.parse(booking.customer_info) 
+                    : booking.customer_info;
+                customerEmail = customerInfo.email;
+                customerName = customerInfo.name || customerInfo.fullName || 'Khách hàng';
+            } catch (parseError) {
+                console.error('Error parsing customer_info for owner booking:', parseError);
+                customerEmail = null;
+                customerName = 'Khách hàng';
+            }
+        } else {
+            // For regular bookings, get from user table
+            customerEmail = user.email;
+            customerName = user.name;
+        }
+
+        if (!customerEmail) {
+            console.warn('No customer email found for booking:', booking.id);
+        }
+
         // Check if booking can be cancelled
         if (booking.status === 'cancelled') {
             performanceMonitor.endOperation(operationId, { error: 'ALREADY_CANCELLED' });
@@ -1215,13 +1240,7 @@ const cancelBookingForMaintenance = async (req, res) => {
             }));
         }
 
-        // 🔍 DEBUG: Log details about bookings that WILL be processed
-        console.log('📋 PROCESSING MAINTENANCE CANCELLATION:');
-        console.log('- Booking ID:', booking.id);
-        console.log('- Status:', booking.status);
-        console.log('- Payment Status:', booking.payment_status);
-        console.log('- User ID:', booking.user_id);
-        console.log('- Will send email: YES (confirmed booking)');
+      
 
         // Process automatic refund (100% for maintenance cancellation)
         const needsStripeRefund = booking.status === 'confirmed' && 
@@ -1232,7 +1251,6 @@ const cancelBookingForMaintenance = async (req, res) => {
         let stripeRefundId = null;
 
         if (needsStripeRefund) {
-            console.log('🔄 Processing Stripe refund for maintenance cancellation:', booking.id);
             
             try {
                 // Find payment record to get Stripe payment intent ID
@@ -1301,52 +1319,55 @@ const cancelBookingForMaintenance = async (req, res) => {
                 const dbOptimizer = require('../utils/dbOptimizer');
                 await dbOptimizer.clearAvailabilityCache(timeSlot.sub_field_id, timeSlot.date);
             }));
-            console.log('✅ TimeSlots updated to maintenance status and cache cleared');
         }
 
         // Send notification email to customer
         let emailSent = false;
         try {
-            const emailService = require('../utils/emailService');
-            
-            // Get ALL time slot info instead of just the first one
-            const timeSlotInfos = booking.timeSlots ? booking.timeSlots.map(ts => ({
-                subField: ts.subfield ? ts.subfield.name || 'N/A' : 'N/A',
-                fieldName: ts.subfield && ts.subfield.field ? ts.subfield.field.name : 'Sân bóng',
-                startTime: ts.start_time,
-                endTime: ts.end_time,
-                date: ts.date
-            })) : [];
-            
-            // Get main field name from first time slot
-            const mainFieldName = timeSlotInfos.length > 0 ? timeSlotInfos[0].fieldName : 'Sân bóng';
-            
-            // Format booking date to Vietnamese timezone and format
-            const bookingDate = new Date(booking.booking_date);
-            const vietnamTime = new Date(bookingDate.getTime() + (7 * 60 * 60 * 1000)); // UTC+7
-            const formattedDate = vietnamTime.toLocaleDateString('vi-VN', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                timeZone: 'Asia/Ho_Chi_Minh'
-            });
-            
-            await emailService.sendMaintenanceCancellationEmail(
-                user.email,
-                user.name,
-                {
-                    fieldName: mainFieldName,
-                    bookingDate: formattedDate,
-                    timeSlots: timeSlotInfos, // Pass all time slots
-                    maintenanceReason: maintenanceReason,
-                    refundAmount: refundAmount,
-                    totalPrice: booking.total_price,
-                    willRefund: needsStripeRefund
-                }
-            );
-            emailSent = true;
-            console.log('✅ Maintenance cancellation email sent to:', user.email);
+            if (customerEmail) {
+                const emailService = require('../utils/emailService');
+                
+                // Get ALL time slot info instead of just the first one
+                const timeSlotInfos = booking.timeSlots ? booking.timeSlots.map(ts => ({
+                    subField: ts.subfield ? ts.subfield.name || 'N/A' : 'N/A',
+                    fieldName: ts.subfield && ts.subfield.field ? ts.subfield.field.name : 'Sân bóng',
+                    startTime: ts.start_time,
+                    endTime: ts.end_time,
+                    date: ts.date
+                })) : [];
+                
+                // Get main field name from first time slot
+                const mainFieldName = timeSlotInfos.length > 0 ? timeSlotInfos[0].fieldName : 'Sân bóng';
+                
+                // Format booking date to Vietnamese timezone and format
+                const bookingDate = new Date(booking.booking_date);
+                const vietnamTime = new Date(bookingDate.getTime() + (7 * 60 * 60 * 1000)); // UTC+7
+                const formattedDate = vietnamTime.toLocaleDateString('vi-VN', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    timeZone: 'Asia/Ho_Chi_Minh'
+                });
+                
+                await emailService.sendMaintenanceCancellationEmail(
+                    customerEmail,
+                    customerName,
+                    {
+                        fieldName: mainFieldName,
+                        bookingDate: formattedDate,
+                        timeSlots: timeSlotInfos, // Pass all time slots
+                        maintenanceReason: maintenanceReason,
+                        refundAmount: refundAmount,
+                        totalPrice: booking.total_price,
+                        willRefund: needsStripeRefund
+                    }
+                );
+                emailSent = true;
+                console.log('✅ Maintenance cancellation email sent to customer:', customerEmail);
+            } else {
+                console.warn('⚠️ No customer email available for maintenance notification');
+            }
         } catch (emailError) {
             console.error('❌ Email notification error:', emailError);
         }
@@ -1517,6 +1538,27 @@ const cancelMultipleBookingsForMaintenance = async (req, res) => {
                     continue;
                 }
 
+                // Get customer info (different logic for owner bookings vs regular bookings)
+                let customerEmail, customerName;
+                if (booking.is_owner_booking && booking.customer_info) {
+                    // For owner bookings, get customer info from customer_info field
+                    try {
+                        const customerInfo = typeof booking.customer_info === 'string' 
+                            ? JSON.parse(booking.customer_info) 
+                            : booking.customer_info;
+                        customerEmail = customerInfo.email;
+                        customerName = customerInfo.name || customerInfo.fullName || 'Khách hàng';
+                    } catch (parseError) {
+                        console.error('Error parsing customer_info for owner booking:', parseError);
+                        customerEmail = null;
+                        customerName = 'Khách hàng';
+                    }
+                } else {
+                    // For regular bookings, get from user table
+                    customerEmail = user.email;
+                    customerName = user.name;
+                }
+
                 // Check if booking can be cancelled
                 if (booking.status === 'cancelled') {
                     results.push({
@@ -1528,7 +1570,6 @@ const cancelMultipleBookingsForMaintenance = async (req, res) => {
                 }
 
                 // 🔍 DEBUG: Check for payment_pending protection in multiple cancellation
-                console.log(`📋 Booking ${bookingId} status: ${booking.status}, payment_status: ${booking.payment_status}`);
                 // Protect bookings that are pending payment (same as single cancellation)
                 if (booking.status === 'payment_pending') {
                     console.log(`🛡️ MULTIPLE CANCELLATION: Protecting payment_pending booking ${bookingId}`);
@@ -1613,30 +1654,32 @@ const cancelMultipleBookingsForMaintenance = async (req, res) => {
                 }
 
                 // Group booking info by customer email for summary email
-                if (!customerEmails.has(user.email)) {
-                    customerEmails.set(user.email, {
-                        customerName: user.name,
+                if (customerEmail && !customerEmails.has(customerEmail)) {
+                    customerEmails.set(customerEmail, {
+                        customerName: customerName,
                         bookings: [],
                         totalRefund: 0
                     });
                 }
 
-                const customerData = customerEmails.get(user.email);
-                customerData.bookings.push({
-                    bookingId: booking.id,
-                    fieldName: booking.timeSlots && booking.timeSlots[0] && booking.timeSlots[0].subfield && booking.timeSlots[0].subfield.field 
-                        ? booking.timeSlots[0].subfield.field.name : 'Sân bóng',
-                    timeSlots: booking.timeSlots ? booking.timeSlots.map(ts => ({
-                        subField: ts.subfield ? ts.subfield.name || 'N/A' : 'N/A',
-                        startTime: ts.start_time,
-                        endTime: ts.end_time,
-                        date: ts.date
-                    })) : [],
-                    refundAmount: refundAmount,
-                    totalPrice: booking.total_price,
-                    bookingDate: booking.booking_date
-                });
-                customerData.totalRefund += refundAmount;
+                if (customerEmail) {
+                    const customerData = customerEmails.get(customerEmail);
+                    customerData.bookings.push({
+                        bookingId: booking.id,
+                        fieldName: booking.timeSlots && booking.timeSlots[0] && booking.timeSlots[0].subfield && booking.timeSlots[0].subfield.field 
+                            ? booking.timeSlots[0].subfield.field.name : 'Sân bóng',
+                        timeSlots: booking.timeSlots ? booking.timeSlots.map(ts => ({
+                            subField: ts.subfield ? ts.subfield.name || 'N/A' : 'N/A',
+                            startTime: ts.start_time,
+                            endTime: ts.end_time,
+                            date: ts.date
+                        })) : [],
+                        refundAmount: refundAmount,
+                        totalPrice: booking.total_price,
+                        bookingDate: booking.booking_date
+                    });
+                    customerData.totalRefund += refundAmount;
+                }
 
                 totalRefundAmount += refundAmount;
 
@@ -1644,7 +1687,7 @@ const cancelMultipleBookingsForMaintenance = async (req, res) => {
                     bookingId,
                     success: true,
                     refundAmount,
-                    customerEmail: user.email
+                    customerEmail: customerEmail
                 });
 
                 // ==== Gửi notification realtime và lưu vào database cho user bị hủy booking do bảo trì ====
@@ -1671,7 +1714,6 @@ const cancelMultipleBookingsForMaintenance = async (req, res) => {
                     console.error('[Notify user cancelMultipleBookingsForMaintenance] Error sending notification:', err);
                 }
 
-                console.log(`✅ Successfully processed booking ${bookingId} - refund: ${refundAmount}đ`);
 
             } catch (error) {
                 console.error(`❌ Error processing booking ${bookingId}:`, error);
