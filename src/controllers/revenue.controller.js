@@ -404,8 +404,11 @@ const revenueController = {
           b.status,
           b.payment_status,
           b.created_at,
+          b.customer_info,
+          b.is_owner_booking,
           u.name as customer_name,
           u.email as customer_email,
+          u.phone as customer_phone,
           f.name as field_name,
           CASE 
             WHEN u.name IS NOT NULL THEN 
@@ -426,15 +429,53 @@ const revenueController = {
         type: sequelize.QueryTypes.SELECT
       });
 
-      const formattedBookings = recentBookings.map(booking => ({
-        id: booking.id,
-        customerName: booking.customer_name || 'Khách vãng lai',
-        fieldName: booking.field_name,
-        date: new Date(booking.booking_date).toLocaleDateString('vi-VN'),
-        status: booking.status,
-        avatar: booking.avatar_initials,
-        createdAt: booking.created_at
-      }));
+      const formattedBookings = recentBookings.map(booking => {
+        let customerName = 'Khách vãng lai';
+        let customerEmail = '';
+        let customerPhone = '';
+        let avatar = 'GU';
+
+        // Check if this is an owner booking with customer_info
+        if (booking.is_owner_booking && booking.customer_info) {
+          try {
+            const customerInfo = JSON.parse(booking.customer_info);
+            customerName = customerInfo.name || customerInfo.fullName || 'Khách vãng lai';
+            customerEmail = customerInfo.email || '';
+            customerPhone = customerInfo.phone || '';
+            
+            // Generate avatar from customer_info name
+            if (customerName && customerName !== 'Khách vãng lai') {
+              const nameParts = customerName.trim().split(' ');
+              if (nameParts.length >= 2) {
+                avatar = nameParts[0].charAt(0).toUpperCase() + nameParts[nameParts.length - 1].charAt(0).toUpperCase();
+              } else {
+                avatar = nameParts[0].charAt(0).toUpperCase() + 'U';
+              }
+            }
+          } catch (parseError) {
+            console.error('Error parsing customer_info:', parseError);
+          }
+        } 
+        // Otherwise use data from users table
+        else if (booking.customer_name) {
+          customerName = booking.customer_name;
+          customerEmail = booking.customer_email || '';
+          customerPhone = booking.customer_phone || '';
+          avatar = booking.avatar_initials || 'GU';
+        }
+
+        return {
+          id: booking.id,
+          customerName,
+          customerEmail,
+          customerPhone,
+          fieldName: booking.field_name,
+          date: new Date(booking.booking_date).toLocaleDateString('vi-VN'),
+          status: booking.status,
+          avatar,
+          createdAt: booking.created_at
+        };
+      });
 
       res.json({
         success: true,
@@ -920,6 +961,10 @@ const revenueController = {
             b.booking_metadata->>'customerName' ILIKE :search OR
             b.booking_metadata->>'customerEmail' ILIKE :search OR
             b.booking_metadata->>'customerPhone' ILIKE :search OR
+            b.customer_info::text ILIKE :search OR
+            u.name ILIKE :search OR
+            u.email ILIKE :search OR
+            u.phone ILIKE :search OR
             f.name ILIKE :search
           )
         `;
@@ -938,6 +983,8 @@ const revenueController = {
           b.payment_method,
           b.created_at,
           b.booking_metadata,
+          b.customer_info,
+          b.is_owner_booking,
           b.user_id,
           f.name as field_name,
           f.location_id,
@@ -1041,12 +1088,51 @@ const revenueController = {
         // Get timeslots for this booking
         const bookingTimeslots = timeslotsByBooking[booking.id] || [];
         
-        // Get customer info from user table or booking metadata
-        const customerInfo = {
-          name: booking.user_name || booking.booking_metadata?.customerName || 'Khách vãng lai',
-          email: booking.user_email || booking.booking_metadata?.customerEmail || '',
-          phone: booking.user_phone || booking.booking_metadata?.customerPhone || ''
+        // Get customer info from user table, customer_info field or booking metadata
+        let customerInfo = {
+          name: 'Khách vãng lai',
+          email: '',
+          phone: ''
         };
+
+        // First try from customer_info field (for owner bookings)
+        if (booking.customer_info) {
+          try {
+            const customerInfoData = typeof booking.customer_info === 'string' 
+              ? JSON.parse(booking.customer_info) 
+              : booking.customer_info;
+            
+            customerInfo.name = customerInfoData.name || customerInfoData.fullName || customerInfo.name;
+            customerInfo.email = customerInfoData.email || customerInfo.email;
+            customerInfo.phone = customerInfoData.phone || customerInfo.phone;
+          } catch (parseError) {
+            console.error('Error parsing customer_info:', parseError);
+          }
+        }
+        // Then try from user table (for regular bookings)
+        else if (booking.user_name) {
+          customerInfo.name = booking.user_name;
+          customerInfo.email = booking.user_email || '';
+          customerInfo.phone = booking.user_phone || '';
+        } 
+        // Finally try from booking_metadata as fallback
+        else {
+          try {
+            if (booking.booking_metadata) {
+              const metadata = typeof booking.booking_metadata === 'string' 
+                ? JSON.parse(booking.booking_metadata) 
+                : booking.booking_metadata;
+              
+              if (metadata.customerInfo) {
+                customerInfo.name = metadata.customerInfo.name || metadata.customerInfo.fullName || customerInfo.name;
+                customerInfo.email = metadata.customerInfo.email || customerInfo.email;
+                customerInfo.phone = metadata.customerInfo.phone || customerInfo.phone;
+              }
+            }
+          } catch (parseError) {
+            console.error('Error parsing booking metadata:', parseError);
+          }
+        }
 
         // Get payment method info
         const paymentMethodMap = {
