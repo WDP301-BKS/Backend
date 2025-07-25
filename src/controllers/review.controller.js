@@ -494,9 +494,55 @@ const upsertReviewByBooking = async (req, res) => {
   }
 };
 
-module.exports = { 
-  createReview, 
-  getReviewsByField, 
+// Lấy review theo booking_id
+const getReviewByBooking = async (req, res) => {
+  try {
+    const { booking_id } = req.query;
+    const user_id = req.user?.id;
+
+    if (!user_id) {
+      return res.status(401).json({ success: false, message: 'Bạn cần đăng nhập.' });
+    }
+
+    if (!booking_id) {
+      return res.status(400).json({ success: false, message: 'Thiếu booking_id.' });
+    }
+
+    // Lấy booking để lấy fieldId
+    const booking = await Booking.findOne({ where: { id: booking_id, user_id } });
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy booking.' });
+    }
+
+    const field_id = booking.booking_metadata?.fieldId || booking.field_id;
+    if (!field_id) {
+      return res.status(400).json({ success: false, message: 'Booking không có fieldId.' });
+    }
+
+    // Tìm review của user cho field này
+    const review = await Review.findOne({
+      where: { user_id, field_id },
+      include: [
+        { model: User, attributes: ['id', 'name', 'profileImage'] },
+        { model: Field, attributes: ['id', 'name'] },
+      ],
+    });
+
+    if (!review) {
+      return res.status(404).json({ success: false, message: 'Chưa có đánh giá cho booking này.' });
+    }
+
+    return res.status(200).json({ success: true, data: review });
+  } catch (error) {
+    console.error('Error getting review by booking:', error);
+    return res.status(500).json({ success: false, message: 'Lỗi khi lấy đánh giá.', error: error.message });
+  }
+};
+
+module.exports = {
+  createReview,
+  getReviewsByField,
   updateReview,
   upsertReviewByBooking,
+  getReviewByBooking,
 };
