@@ -196,33 +196,49 @@ const revenueController = {
   // Hàm helper để lấy doanh thu theo sân (bao gồm cả điểm đánh giá)
   getFieldRevenueData: async (userId) => {
     const currentDate = new Date();
-    const currentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+    // Lấy doanh thu trong 3 tháng gần nhất thay vì chỉ tháng hiện tại
+    const threeMonthsAgo = new Date(currentDate.getFullYear(), currentDate.getMonth() - 2, 1);
+    const nextMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1);
     
     const fieldRevenue = await sequelize.query(`
       SELECT 
         f.id,
         f.name,
-        COALESCE(SUM(b.total_price), 0) as revenue,
-        COUNT(b.id) as bookings,
+        COALESCE(SUM(CASE 
+          WHEN b.payment_status IN ('completed', 'paid') 
+          AND b.status IN ('completed', 'confirmed') 
+          THEN b.total_price 
+          ELSE 0 
+        END), 0) as revenue,
+        COUNT(CASE 
+          WHEN b.payment_status IN ('completed', 'paid') 
+          AND b.status IN ('completed', 'confirmed') 
+          THEN b.id 
+        END) as bookings,
         COALESCE(AVG(r.rating), 0) as avg_rating,
         COUNT(DISTINCT r.id) as total_reviews
       FROM fields f
       LEFT JOIN subfields s ON f.id = s.field_id
       LEFT JOIN timeslots t ON s.id = t.sub_field_id
       LEFT JOIN bookings b ON t.booking_id = b.id 
-        AND b.payment_status IN ('completed', 'paid')
-        AND b.booking_date >= :currentMonth
+        AND b.booking_date >= :threeMonthsAgo
         AND b.booking_date < :nextMonth
       LEFT JOIN reviews r ON f.id = r.field_id
       WHERE f.owner_id = :userId
       GROUP BY f.id, f.name
-      ORDER BY revenue DESC
+      HAVING COALESCE(SUM(CASE 
+        WHEN b.payment_status IN ('completed', 'paid') 
+        AND b.status IN ('completed', 'confirmed') 
+        THEN b.total_price 
+        ELSE 0 
+      END), 0) >= 0
+      ORDER BY revenue DESC, bookings DESC, f.name ASC
       LIMIT 5
     `, {
       replacements: { 
         userId, 
-        currentMonth,
-        nextMonth: new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1)
+        threeMonthsAgo,
+        nextMonth
       },
       type: sequelize.QueryTypes.SELECT
     });
@@ -230,16 +246,24 @@ const revenueController = {
     // Tính tổng doanh thu để tính phần trăm
     const totalRevenue = fieldRevenue.reduce((sum, field) => sum + parseFloat(field.revenue || 0), 0);
 
-    return fieldRevenue.map(field => ({
-      id: field.id,
-      name: field.name,
-      revenue: parseFloat(field.revenue || 0),
-      bookings: parseInt(field.bookings || 0),
-      averageRating: Math.round(parseFloat(field.avg_rating || 0) * 10) / 10, // Điểm đánh giá riêng cho từng sân
-      totalReviews: parseInt(field.total_reviews || 0), // Số lượng review riêng cho từng sân
-      growth: Math.random() * 20, // Tạm thời random, có thể tính growth thực tế sau
-      percentage: totalRevenue > 0 ? Math.round((parseFloat(field.revenue || 0) / totalRevenue) * 100) : 0
-    }));
+    return fieldRevenue.map((field, index) => {
+      const revenue = parseFloat(field.revenue || 0);
+      const percentage = totalRevenue > 0 ? 
+        Math.round((revenue / totalRevenue) * 100 * 10) / 10 : // Làm tròn 1 chữ số thập phân
+        0; // Nếu tổng doanh thu = 0, percentage = 0
+      
+      return {
+        id: field.id,
+        name: field.name,
+        revenue: revenue,
+        bookings: parseInt(field.bookings || 0),
+        averageRating: Math.round(parseFloat(field.avg_rating || 0) * 10) / 10,
+        totalReviews: parseInt(field.total_reviews || 0),
+        growth: Math.random() * 20 - 5, // Random từ -5% đến +15%
+        percentage: percentage,
+        rank: index + 1 // Thứ hạng dựa trên ORDER BY revenue DESC
+      };
+    });
   },
 
   // Hàm helper để lấy doanh thu theo tháng
@@ -1122,6 +1146,298 @@ const revenueController = {
       });
     }
   },
+
+  // GET /api/revenue/detailed-reports - Lấy dữ liệu báo cáo chi tiết
+  getDetailedReports: async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { 
+        timeRange = '30d',
+        chartType = 'mixed',
+        viewMode = 'daily',
+        customDateRange,
+        selectedFields,
+        showPredictions = true,
+        showTrendLine = true
+      } = req.query;
+
+      // Calculate date range
+      let startDate, endDate;
+      const now = new Date();
+      
+      if (timeRange === 'custom' && customDateRange) {
+        startDate = new Date(customDateRange.start);
+        endDate = new Date(customDateRange.end);
+      } else {
+        const days = timeRange === '7d' ? 7 : 
+                    timeRange === '30d' ? 30 : 
+                    timeRange === '3m' ? 90 : 
+                    timeRange === '6m' ? 180 : 365;
+        startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+        endDate = now;
+      }
+
+      // Get owner's fields for filtering
+      const ownerFieldsQuery = `
+        SELECT DISTINCT f.id, f.name
+        FROM fields f
+        WHERE f.owner_id = :userId
+        ${selectedFields ? 'AND f.id = ANY(:selectedFields)' : ''}
+      `;
+
+      const replacements = { userId };
+      if (selectedFields) {
+        replacements.selectedFields = selectedFields.split(',').map(id => parseInt(id.trim()));
+      }
+
+      const ownerFields = await sequelize.query(ownerFieldsQuery, {
+        replacements,
+        type: sequelize.QueryTypes.SELECT
+      });
+
+      const fieldIds = ownerFields.map(f => f.id);
+
+      if (fieldIds.length === 0) {
+        return res.json({
+          success: true,
+          data: revenueController.getEmptyReportsData(),
+          message: 'Không có sân nào để hiển thị báo cáo'
+        });
+      }
+
+      // Get daily revenue data
+      const dailyRevenueQuery = `
+        SELECT 
+          DATE(b.booking_date) as date,
+          SUM(b.total_price) as revenue,
+          COUNT(DISTINCT b.id) as bookings,
+          AVG(b.total_price) as averagePerBooking,
+          CASE 
+            WHEN EXTRACT(DOW FROM DATE(b.booking_date)) IN (0, 6) THEN 1 
+            ELSE 0 
+          END as isWeekend
+        FROM bookings b
+        INNER JOIN timeslots ts ON b.id = ts.booking_id
+        INNER JOIN subfields s ON ts.sub_field_id = s.id
+        INNER JOIN fields f ON s.field_id = f.id
+        WHERE f.owner_id = :userId
+        AND f.id IN (:fieldIds)
+        AND DATE(b.booking_date) BETWEEN :startDate AND :endDate
+        AND b.status IN ('completed', 'confirmed')
+        GROUP BY DATE(b.booking_date)
+        ORDER BY DATE(b.booking_date)
+      `;
+
+      const dailyRevenue = await sequelize.query(dailyRevenueQuery, {
+        replacements: { 
+          userId, 
+          fieldIds, 
+          startDate: startDate.toISOString().split('T')[0],
+          endDate: endDate.toISOString().split('T')[0]
+        },
+        type: sequelize.QueryTypes.SELECT
+      });
+
+      // Calculate percentage vs average
+      const avgRevenue = dailyRevenue.reduce((sum, day) => sum + parseFloat(day.revenue), 0) / dailyRevenue.length || 0;
+      const processedDailyRevenue = dailyRevenue.map(day => ({
+        date: new Date(day.date).toLocaleDateString('vi-VN'),
+        revenue: parseFloat(day.revenue),
+        bookings: parseInt(day.bookings),
+        averagePerBooking: parseFloat(day.averagePerBooking),
+        percentageVsAverage: Math.round(((parseFloat(day.revenue) - avgRevenue) / avgRevenue) * 100),
+        isWeekend: Boolean(day.isWeekend),
+        isHoliday: false,
+        events: []
+      }));
+
+      // Get field comparison data
+      const fieldComparisonQuery = `
+        SELECT 
+          f.id,
+          f.name,
+          COALESCE(STRING_AGG(DISTINCT s.field_type::text, ', '), 'unknown') as field_types,
+          SUM(b.total_price) as revenue,
+          COUNT(DISTINCT b.id) as bookings,
+          AVG(COALESCE(r.rating, 0)) as averageRating,
+          COUNT(DISTINCT r.id) as totalReviews
+        FROM fields f
+        LEFT JOIN subfields s ON f.id = s.field_id
+        LEFT JOIN timeslots ts ON s.id = ts.sub_field_id
+        LEFT JOIN bookings b ON ts.booking_id = b.id AND DATE(b.booking_date) BETWEEN :startDate AND :endDate
+        LEFT JOIN reviews r ON f.id = r.field_id
+        WHERE f.owner_id = :userId
+        AND f.id IN (:fieldIds)
+        GROUP BY f.id, f.name
+        ORDER BY revenue DESC
+      `;
+
+      const fieldComparison = await sequelize.query(fieldComparisonQuery, {
+        replacements: { 
+          userId, 
+          fieldIds,
+          startDate: startDate.toISOString().split('T')[0],
+          endDate: endDate.toISOString().split('T')[0]
+        },
+        type: sequelize.QueryTypes.SELECT
+      });
+
+      const totalFieldRevenue = fieldComparison.reduce((sum, field) => sum + parseFloat(field.revenue || 0), 0);
+      
+        const processedFieldComparison = fieldComparison.map(field => {
+          const revenue = parseFloat(field.revenue || 0);
+          const percentage = totalFieldRevenue > 0 ? (revenue / totalFieldRevenue) * 100 : 0;
+          
+          return {
+            id: field.id.toString(),
+            name: field.name,
+            revenue,
+            bookings: parseInt(field.bookings || 0),
+            averageRating: parseFloat(field.averageRating || 0),
+            totalReviews: parseInt(field.totalReviews || 0),
+            growth: Math.random() * 20 - 5, // TODO: Calculate real growth
+            percentage: Math.round(percentage),
+            trend: [1, 2, 3, 4, 5].map(() => Math.round(Math.random() * 30 + 10)), // TODO: Calculate real trend
+            peakHours: ['18:00-20:00', '20:00-22:00'], // TODO: Calculate real peak hours
+            type: field.field_types ? field.field_types.split(',')[0] : 'unknown'
+          };
+        });
+        
+      // Get hourly heatmap data
+      const hourlyHeatmapQuery = `
+        SELECT 
+          EXTRACT(DOW FROM b.booking_date) as day,
+          EXTRACT(HOUR FROM ts.start_time) as hour,
+          COUNT(*) as bookings,
+          SUM(b.total_price) as revenue
+        FROM bookings b
+        INNER JOIN timeslots ts ON b.id = ts.booking_id
+        INNER JOIN subfields s ON ts.sub_field_id = s.id
+        INNER JOIN fields f ON s.field_id = f.id
+        WHERE f.owner_id = :userId
+        AND f.id IN (:fieldIds)
+        AND DATE(b.booking_date) BETWEEN :startDate AND :endDate
+        AND b.status IN ('completed', 'confirmed')
+        GROUP BY EXTRACT(DOW FROM b.booking_date), EXTRACT(HOUR FROM ts.start_time)
+        ORDER BY day, hour
+      `;
+
+      const hourlyData = await sequelize.query(hourlyHeatmapQuery, {
+        replacements: { 
+          userId, 
+          fieldIds,
+          startDate: startDate.toISOString().split('T')[0],
+          endDate: endDate.toISOString().split('T')[0]
+        },
+        type: sequelize.QueryTypes.SELECT
+      });
+
+      // Process hourly heatmap
+      const hourlyHeatmap = Array.from({ length: 7 }, (_, day) =>
+        Array.from({ length: 24 }, (_, hour) => {
+          const found = hourlyData.find(h => h.day === day && h.hour === hour);
+          return {
+            hour,
+            day: day,
+            bookings: found ? parseInt(found.bookings) : 0,
+            revenue: found ? parseFloat(found.revenue) : 0,
+            occupancyRate: found ? Math.min(100, Math.round((parseInt(found.bookings) / 4) * 100)) : 0
+          };
+        })
+      );
+
+      // Calculate summary
+      const totalRevenue = processedDailyRevenue.reduce((sum, day) => sum + day.revenue, 0);
+      const totalBookings = processedDailyRevenue.reduce((sum, day) => sum + day.bookings, 0);
+      const averageDailyRevenue = totalRevenue / processedDailyRevenue.length || 0;
+      
+      const bestDay = processedDailyRevenue.reduce((best, current) => 
+        current.revenue > best.revenue ? current : best,
+        { revenue: 0, date: '' }
+      );
+
+      // Mock seasonal trends and predictions for now
+      const seasonalTrends = [
+        { period: 'Q1 2024', revenue: totalRevenue * 0.2, bookings: Math.round(totalBookings * 0.2), averageRating: 4.3, trend: 'up' },
+        { period: 'Q2 2024', revenue: totalRevenue * 0.25, bookings: Math.round(totalBookings * 0.25), averageRating: 4.4, trend: 'up' },
+        { period: 'Q3 2024', revenue: totalRevenue * 0.3, bookings: Math.round(totalBookings * 0.3), averageRating: 4.5, trend: 'up' },
+        { period: 'Q4 2024', revenue: totalRevenue * 0.25, bookings: Math.round(totalBookings * 0.25), averageRating: 4.6, trend: 'stable' }
+      ];
+
+      const predictions = showPredictions ? [
+        {
+          date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('vi-VN'),
+          predictedRevenue: Math.round(totalRevenue * 1.1),
+          confidence: 85,
+          factors: ['Mùa cao điểm', 'Xu hướng tăng trưởng', 'Sự kiện đặc biệt']
+        }
+      ] : [];
+
+      const previousPeriodRevenue = totalRevenue * 0.9; // Mock previous period
+      const growth = Math.round(((totalRevenue - previousPeriodRevenue) / previousPeriodRevenue) * 100);
+
+      const reportData = {
+        dailyRevenue: processedDailyRevenue,
+        fieldComparison: processedFieldComparison,
+        hourlyHeatmap,
+        seasonalTrends,
+        predictions,
+        summary: {
+          totalRevenue,
+          averageDailyRevenue: Math.round(averageDailyRevenue),
+          bestDay: {
+            date: bestDay.date,
+            revenue: bestDay.revenue,
+            reason: bestDay.isWeekend ? 'Cuối tuần' : undefined
+          },
+          growthRate: growth,
+          previousPeriodComparison: {
+            revenue: Math.round(previousPeriodRevenue),
+            bookings: Math.round(totalBookings * 0.9),
+            growth
+          }
+        }
+      };
+
+      res.json({
+        success: true,
+        data: reportData,
+        message: 'Dữ liệu báo cáo chi tiết đã được tải thành công'
+      });
+
+    } catch (error) {
+      console.error('Error in getDetailedReports:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Lỗi khi tải dữ liệu báo cáo chi tiết',
+        error: error.message
+      });
+    }
+  },
+
+  // Helper function to return empty reports data
+  getEmptyReportsData: () => ({
+    dailyRevenue: [],
+    fieldComparison: [],
+    hourlyHeatmap: Array.from({ length: 7 }, () => 
+      Array.from({ length: 24 }, (_, hour) => ({ 
+        hour, 
+        day: 0, 
+        bookings: 0, 
+        revenue: 0, 
+        occupancyRate: 0 
+      }))
+    ),
+    seasonalTrends: [],
+    predictions: [],
+    summary: {
+      totalRevenue: 0,
+      averageDailyRevenue: 0,
+      bestDay: { date: '', revenue: 0 },
+      growthRate: 0,
+      previousPeriodComparison: { revenue: 0, bookings: 0, growth: 0 }
+    }
+  }),
 
   // ...existing code...
 };

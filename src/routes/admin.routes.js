@@ -9,6 +9,8 @@ const { authMiddleware, isAdmin } = require('../middlewares/auth.middleware');
 router.get('/dashboard/statistics', adminDashboardController.getDashboardStatistics);
 router.get('/dashboard/monthly-revenue', adminDashboardController.getMonthlyRevenueData);
 router.get('/dashboard/top-field-owners', adminDashboardController.getTopFieldOwners);
+router.get('/dashboard/package-service-stats', adminDashboardController.getPackageServiceStats);
+router.get('/dashboard/field-booking-revenue', adminDashboardController.getFieldBookingRevenueStats);
 
 // Tất cả routes admin đều cần authentication và role admin
 router.use(authMiddleware, isAdmin);

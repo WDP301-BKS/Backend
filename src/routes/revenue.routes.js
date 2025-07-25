@@ -95,4 +95,11 @@ router.get('/owner-bookings', authMiddleware, revenueController.getOwnerBookings
  */
 router.get('/owner-booking-stats', authMiddleware, revenueController.getOwnerBookingStatsEndpoint);
 
+/**
+ * @route GET /api/revenue/detailed-reports
+ * @desc Get detailed reports data for owner
+ * @access Private (Owner only)
+ */
+router.get('/detailed-reports', authMiddleware, revenueController.getDetailedReports);
+
 module.exports = router;

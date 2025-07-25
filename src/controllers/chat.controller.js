@@ -71,7 +71,13 @@ const getChatDetail = asyncHandler(async (req, res) => {
 
     const chatDetail = await chatService.getChatDetail(chatId, currentUserId);
 
-    return successResponse(res, "Chi tiết chat", chatDetail, HTTP_STATUS.OK);
+    // Thêm currentUserId vào response để frontend sử dụng
+    const responseData = {
+      ...chatDetail,
+      currentUserId: currentUserId
+    };
+
+    return successResponse(res, "Chi tiết chat", responseData, HTTP_STATUS.OK);
   } catch (error) {
     console.error("Error in getChatDetail:", error);
 
