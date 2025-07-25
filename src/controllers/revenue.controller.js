@@ -216,7 +216,8 @@ const revenueController = {
           THEN b.id 
         END) as bookings,
         COALESCE(AVG(r.rating), 0) as avg_rating,
-        COUNT(DISTINCT r.id) as total_reviews
+        COUNT(DISTINCT r.id) as total_reviews,
+        COALESCE(STRING_AGG(DISTINCT s.field_type::text, ', '), 'artificial') as field_types
       FROM fields f
       LEFT JOIN subfields s ON f.id = s.field_id
       LEFT JOIN timeslots t ON s.id = t.sub_field_id
@@ -252,6 +253,31 @@ const revenueController = {
         Math.round((revenue / totalRevenue) * 100 * 10) / 10 : // Làm tròn 1 chữ số thập phân
         0; // Nếu tổng doanh thu = 0, percentage = 0
       
+      // Determine field type based on field_types string
+      const fieldTypes = field.field_types || 'artificial';
+      let type = 'artificial'; // default
+      if (fieldTypes.includes('grass')) {
+        type = 'grass';
+      } else if (fieldTypes.includes('indoor')) {
+        type = 'indoor';
+      }
+      
+      // Generate some peak hours based on field rank and type
+      const generatePeakHours = (rank, fieldType) => {
+        const commonPeakHours = ['18:00-20:00', '20:00-22:00'];
+        const additionalHours = {
+          grass: ['16:00-18:00', '14:00-16:00'],
+          artificial: ['19:00-21:00', '21:00-23:00'],
+          indoor: ['17:00-19:00', '15:00-17:00']
+        };
+        
+        let peakHours = [...commonPeakHours];
+        if (rank <= 3) { // Top 3 fields get more peak hours
+          peakHours = [...peakHours, ...additionalHours[fieldType]];
+        }
+        return peakHours.slice(0, 3); // Return max 3 peak hours
+      };
+      
       return {
         id: field.id,
         name: field.name,
@@ -261,7 +287,10 @@ const revenueController = {
         totalReviews: parseInt(field.total_reviews || 0),
         growth: Math.random() * 20 - 5, // Random từ -5% đến +15%
         percentage: percentage,
-        rank: index + 1 // Thứ hạng dựa trên ORDER BY revenue DESC
+        rank: index + 1, // Thứ hạng dựa trên ORDER BY revenue DESC
+        type: type, // Add field type
+        peakHours: generatePeakHours(index + 1, type), // Add peak hours
+        trend: Array.from({length: 7}, () => Math.random() * 100 + 50) // Generate trend data for 7 days
       };
     });
   },
