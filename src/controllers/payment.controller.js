@@ -845,7 +845,6 @@ class PaymentController {
               refund_amount: 0,
               remaining_amount: 0,
               is_owner_booking: false,
-              created_by_owner: null,
               cancellation_reason: null,
               refund_method: null,
               cancelled_at: null,

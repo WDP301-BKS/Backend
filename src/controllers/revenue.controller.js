@@ -406,11 +406,33 @@ const revenueController = {
           b.created_at,
           b.customer_info,
           b.is_owner_booking,
-          u.name as customer_name,
-          u.email as customer_email,
-          u.phone as customer_phone,
+          CASE 
+            WHEN b.is_owner_booking = true THEN 
+              COALESCE(
+                (b.customer_info->>'name')::text,
+                (b.customer_info->>'fullName')::text,
+                'Khách vãng lai'
+              )
+            ELSE u.name
+          END as customer_name,
+          CASE 
+            WHEN b.is_owner_booking = true THEN 
+              (b.customer_info->>'email')::text
+            ELSE u.email
+          END as customer_email,
+          CASE 
+            WHEN b.is_owner_booking = true THEN 
+              (b.customer_info->>'phone')::text
+            ELSE u.phone
+          END as customer_phone,
           f.name as field_name,
           CASE 
+            WHEN b.is_owner_booking = true AND (b.customer_info->>'name')::text IS NOT NULL THEN 
+              UPPER(SUBSTRING((b.customer_info->>'name')::text, 1, 1)) || 
+              COALESCE(
+                UPPER(SUBSTRING(TRIM(SUBSTRING((b.customer_info->>'name')::text FROM POSITION(' ' IN (b.customer_info->>'name')::text) + 1)), 1, 1)),
+                ''
+              )
             WHEN u.name IS NOT NULL THEN 
               UPPER(SUBSTRING(u.name, 1, 1)) || 
               UPPER(SUBSTRING(TRIM(SUBSTRING(u.name FROM POSITION(' ' IN u.name) + 1)), 1, 1))
@@ -991,9 +1013,25 @@ const revenueController = {
           l.address_text as location_address,
           l.city,
           l.district,
-          u.name as user_name,
-          u.email as user_email,
-          u.phone as user_phone,
+          CASE 
+            WHEN b.is_owner_booking = true THEN 
+              COALESCE(
+                (b.customer_info->>'name')::text,
+                (b.customer_info->>'fullName')::text,
+                'Khách vãng lai'
+              )
+            ELSE u.name
+          END as user_name,
+          CASE 
+            WHEN b.is_owner_booking = true THEN 
+              (b.customer_info->>'email')::text
+            ELSE u.email
+          END as user_email,
+          CASE 
+            WHEN b.is_owner_booking = true THEN 
+              (b.customer_info->>'phone')::text
+            ELSE u.phone
+          END as user_phone,
           r.rating,
           r.comment as review_comment
         FROM bookings b

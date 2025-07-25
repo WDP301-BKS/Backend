@@ -1853,7 +1853,7 @@ const createOwnerBooking = async (req, res) => {
             // Create booking record
             const newBooking = await Booking.create({
                 field_id: fieldId,
-                user_id: null, // No user for owner bookings
+                user_id: ownerId, // Store owner ID in user_id when owner creates booking for customer
                 booking_date: bookingDate,
                 total_price: totalAmount,
                 status: 'confirmed', // Owner bookings are automatically confirmed
@@ -1864,7 +1864,6 @@ const createOwnerBooking = async (req, res) => {
                 customer_info: JSON.stringify(customerInfo),
                 notes: notes || '',
                 is_owner_booking: true,
-                created_by_owner: ownerId,
                 booking_metadata: JSON.stringify({
                     playDate: bookingDate,
                     timeSlots: timeSlots,

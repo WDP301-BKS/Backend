@@ -22,7 +22,7 @@ User.hasMany(Field, { foreignKey: 'owner_id', as: 'ownedFields' });
 Field.belongsTo(User, { foreignKey: 'owner_id', as: 'owner' });
 
 User.hasMany(Booking, { foreignKey: 'user_id' });
-Booking.belongsTo(User, { foreignKey: 'user_id', required: false }); // Allow null for guest bookings
+Booking.belongsTo(User, { foreignKey: 'user_id', required: false }); // Allow null for guest bookings, or stores owner_id for owner bookings
 
 User.hasMany(Review, { foreignKey: 'user_id' });
 Review.belongsTo(User, { foreignKey: 'user_id' });

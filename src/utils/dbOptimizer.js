@@ -151,11 +151,6 @@ SELECT id, name, field_type
    */
   async checkAvailabilityOptimized(fieldId, date, timeSlots) {
     const cacheKey = `availability:${fieldId}:${date}`;
-    
-    // Skip cache for now to ensure fresh data for maintenance updates
-    // TODO: Implement cache invalidation on maintenance status changes
-    console.log(`🔍 Checking availability for field ${fieldId} on ${date}`);
-    
     // Use raw SQL for better performance - Updated with user and booking info
     const query = `
       SELECT 
@@ -172,8 +167,21 @@ SELECT id, name, field_type
         b.payment_status,
         b.total_price as final_price,
         b.customer_info,
-        u.name as customer_name,
-        u.phone as customer_phone,
+        b.is_owner_booking,
+        CASE 
+          WHEN b.is_owner_booking = true THEN 
+            COALESCE(
+              (b.customer_info->>'name')::text,
+              (b.customer_info->>'fullName')::text,
+              'Khách vãng lai'
+            )
+          ELSE u.name
+        END as customer_name,
+        CASE 
+          WHEN b.is_owner_booking = true THEN 
+            (b.customer_info->>'phone')::text
+          ELSE u.phone
+        END as customer_phone,
         b.created_at as booking_date
       FROM timeslots ts
       INNER JOIN subfields sf ON ts.sub_field_id = sf.id
@@ -187,9 +195,7 @@ SELECT id, name, field_type
         )
       ORDER BY ts.sub_field_id, ts.start_time
     `;
-    
-    console.log('🔍 Executing query with params:', { fieldId, date });
-    
+     
     const unavailableSlots = await sequelize.query(query, {
       replacements: { fieldId, date },
       type: QueryTypes.SELECT

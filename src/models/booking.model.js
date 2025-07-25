@@ -68,14 +68,6 @@ const Booking = sequelize.define('booking', {
     defaultValue: false,
     allowNull: false
   },
-  created_by_owner: {
-    type: DataTypes.UUID,
-    allowNull: true,
-    references: {
-      model: 'Users',
-      key: 'id'
-    }
-  },
   remaining_amount: {
     type: DataTypes.DECIMAL(10, 2),
     defaultValue: 0,
