@@ -503,23 +503,17 @@ const getFieldBookingRevenueStats = async (req, res) => {
                 u.email as owner_email,
                 u."profileImage" as owner_avatar,
                 ${selectClause}
-                COUNT(DISTINCT b.id) as total_bookings,
                 COUNT(DISTINCT f.id) as total_fields,
                 SUM(b.total_price) as total_revenue,
                 AVG(b.total_price) as avg_booking_value,
-                COUNT(DISTINCT b.user_id) as unique_customers,
-                COUNT(CASE WHEN b.status = 'completed' THEN 1 END) as completed_bookings,
-                COUNT(CASE WHEN b.status = 'cancelled' THEN 1 END) as cancelled_bookings,
-                ROUND(AVG(COALESCE(r.rating, 0)), 2) as avg_rating,
-                COUNT(DISTINCT r.id) as total_reviews
+                COUNT(DISTINCT b.user_id) as unique_customers
             FROM users u
             JOIN fields f ON u.id = f.owner_id
             JOIN subfields sf ON f.id = sf.field_id
             JOIN timeslots ts ON sf.id = ts.sub_field_id
             JOIN bookings b ON ts.booking_id = b.id
-            LEFT JOIN reviews r ON f.id = r.field_id
             WHERE u.role = '${USER_ROLES.OWNER}'
-            AND b.status IN ('confirmed', 'completed', 'cancelled')
+            AND b.status IN ('confirmed', 'completed')
             AND b.payment_status IN ('paid', 'completed')
             ${dateCondition}
             ${ownerCondition}
@@ -537,7 +531,7 @@ const getFieldBookingRevenueStats = async (req, res) => {
             JOIN timeslots ts ON sf.id = ts.sub_field_id
             JOIN bookings b ON ts.booking_id = b.id
             WHERE u.role = '${USER_ROLES.OWNER}'
-            AND b.status IN ('confirmed', 'completed', 'cancelled')
+            AND b.status IN ('confirmed', 'completed')
             AND b.payment_status IN ('paid', 'completed')
             ${dateCondition}
             ${ownerCondition}
@@ -572,14 +566,6 @@ const getFieldBookingRevenueStats = async (req, res) => {
 
         // Format the revenue data
         const formattedRevenueData = revenueData.map(item => {
-            const cancellationRate = item.total_bookings > 0 
-                ? ((item.cancelled_bookings / item.total_bookings) * 100).toFixed(2)
-                : 0;
-
-            const completionRate = item.total_bookings > 0
-                ? ((item.completed_bookings / item.total_bookings) * 100).toFixed(2)
-                : 0;
-
             return {
                 ownerId: item.owner_id,
                 ownerName: item.owner_name,
@@ -588,17 +574,10 @@ const getFieldBookingRevenueStats = async (req, res) => {
                 ...(period === 'daily' && { periodDate: item.period_date }),
                 ...(period === 'monthly' && { periodMonth: item.period_month }),
                 ...(period === 'yearly' && { periodYear: item.period_year }),
-                totalBookings: parseInt(item.total_bookings),
                 totalFields: parseInt(item.total_fields),
                 totalRevenue: parseFloat(item.total_revenue || 0),
                 avgBookingValue: parseFloat(item.avg_booking_value || 0),
-                uniqueCustomers: parseInt(item.unique_customers),
-                completedBookings: parseInt(item.completed_bookings),
-                cancelledBookings: parseInt(item.cancelled_bookings),
-                cancellationRate: parseFloat(cancellationRate),
-                completionRate: parseFloat(completionRate),
-                avgRating: parseFloat(item.avg_rating || 0),
-                totalReviews: parseInt(item.total_reviews || 0)
+                uniqueCustomers: parseInt(item.unique_customers)
             };
         });
 
